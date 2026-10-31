@@ -40,7 +40,7 @@ async function rpc(fn, args) {
   return data;
 }
 const msg = (text, kind = "") => { const m = document.getElementById("msg"); if (m) { m.className = "msg " + kind; m.textContent = text; if (kind === "bad") { m.classList.remove("flash-bad"); void m.offsetWidth; m.classList.add("flash-bad"); } } };
-const reasonLabel = { break: "Break", bathroom: "Bathroom", end_of_shift: "End of shift", other: "Other" };
+const reasonLabel = { break: "Break", bathroom: "Bathroom", end_of_shift: "End of shift", other: "Other", unassigned: "Unassigned by supervisor" };
 
 // ===================== HOME: pick a cart =====================
 let state = null, binOk = false;
@@ -149,6 +149,10 @@ function pickScreen() {
 }
 async function doPick(t, barcode, qty) {
   const r = await rpc("wms_pick_scan", { p_task_id: t.id, p_barcode: barcode, p_qty: qty });
+  if (!r.ok && (r.error === "CART_PAUSED" || r.error === "NOT_YOUR_CART")) {
+    bad(); return home(r.error === "NOT_YOUR_CART" ? `${state.cart} has been given to ${r.picker ?? "another picker"}. Pick another cart.`
+                                                   : `${state.cart} was taken off you by a supervisor. Scan it again to carry on, or pick another cart.`, "bad");
+  }
   if (!r.ok) {
     bad();
     return msg({ WRONG_ITEM: `WRONG ITEM. You scanned ${r.scanned_sku}. Need ${r.expected_sku}.`, UNKNOWN_BARCODE: "Barcode not recognised. Scan the product barcode.",
@@ -207,7 +211,7 @@ function cantPickBox(t) {
 // pause
 function pauseBox() {
   $("mpanel").innerHTML = `<h2>Pause ${esc(state.cart)}</h2><div class="opts">
-    ${Object.entries(reasonLabel).map(([k, l]) => `<button data-p="${k}">${l}${k === "end_of_shift" ? " (another picker can carry on)" : ""}</button>`).join("")}</div>
+    ${Object.entries(reasonLabel).filter(([k]) => k !== "unassigned").map(([k, l]) => `<button data-p="${k}">${l}${k === "end_of_shift" ? " (another picker can carry on)" : ""}</button>`).join("")}</div>
     <div class="btns"><button class="ghost" id="pno">Keep picking</button><span></span></div>`;
   $("mpanel").querySelectorAll("[data-p]").forEach((b) => b.onclick = async () => {
     try { const r = await rpc("wms_pick_pause", { p_session_id: state.session_id, p_reason: b.dataset.p }); $("modal").hidden = true;

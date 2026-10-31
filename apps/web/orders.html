@@ -23,6 +23,9 @@
   .build input{width:80px;min-height:40px}
   .build .mono{color:#ccc}
   .build button{min-height:40px}
+  .seg{display:inline-flex;border:1px solid #fff}
+  .seg button{background:transparent;color:#fff;border:0;min-height:40px;font-size:14px;padding:0 12px}
+  .seg button.on{background:#fff;color:#111}
   table input[type=checkbox]{width:20px;min-height:20px}
   td{font-size:14px} tr.sel td{background:#eef1f8}
   .tag{display:inline-block;font:600 10px "IBM Plex Mono",monospace;padding:2px 5px;border:1px solid var(--rule);margin:1px;background:var(--panel)}
@@ -63,7 +66,9 @@
     <div class="build" id="build" hidden>
       <span><b id="selcount">0</b> <span class="mono">ORDERS SELECTED</span></span>
       <label class="mono">Select first <input id="firstn" inputmode="numeric" value="60"></label><button class="ghost" id="pickfirst" style="color:#fff;border-color:#fff">Select</button>
-      <label class="mono">Orders per cart <input id="per" inputmode="numeric" value="12"></label>
+      <span class="seg"><button id="m1" class="on" type="button">1 order per tote</button><button id="m2" type="button">Share totes</button></span>
+      <label class="mono">Totes per cart <input id="per" inputmode="numeric" value="12"></label>
+      <label class="mono" id="ppt" hidden>Pieces per tote <input id="pieces" inputmode="numeric" value="6"></label>
       <span class="mono" id="cartinfo"></span>
       <span style="flex:1"></span>
       <button class="signal" id="buildbtn" disabled>Build carts</button>
@@ -147,33 +152,62 @@ $("all").addEventListener("change", () => { for (const o of data.orders) if (o.r
 $("pickfirst").onclick = () => { sel.clear(); const n = Number($("firstn").value) || 0;
   for (const o of data.orders.filter((x) => x.ready === "ready" && x.stock_ok).slice(0, n)) sel.add(o.id); loadOrdersRender(); };
 function loadOrdersRender() { $("rows").innerHTML = data.orders.map(row).join(""); updateSel(); }
+let shareMode = false;
+// same packing rules as the database: whole orders only, express first then oldest
+function plan() {
+  const per = Math.max(1, Math.min(48, Number($("per").value) || 12));
+  const pieces = shareMode ? Math.max(1, Number($("pieces").value) || 6) : null;
+  const queue = (data?.orders ?? []).filter((o) => sel.has(o.id));
+  const used = new Array(queue.length).fill(false);
+  let carts = 0, totes = 0, free = data?.free_carts ?? 0;
+  while (used.includes(false) && carts < free) {
+    const slots = []; let placed = 0;
+    queue.forEach((o, i) => {
+      if (used[i]) return;
+      if (!shareMode) { if (slots.length < per) { slots.push(o.units); used[i] = true; placed++; } return; }
+      let j = o.units <= pieces ? slots.findIndex((u) => u + o.units <= pieces) : -1;
+      if (j < 0 && slots.length < per) { slots.push(0); j = slots.length - 1; }
+      if (j < 0) return;
+      slots[j] += o.units; used[i] = true; placed++;
+    });
+    if (!placed) break;
+    carts++; totes += slots.length;
+  }
+  return { carts, totes, left: used.filter((u) => !u).length, per, pieces };
+}
 function updateSel() {
   $("selcount").textContent = sel.size;
-  const per = Math.max(1, Number($("per").value) || 12);
-  const need = Math.ceil(sel.size / per);
-  $("cartinfo").textContent = sel.size ? `= ${need} CART${need === 1 ? "" : "S"} · ${data?.free_carts ?? 0} FREE` : `${data?.free_carts ?? 0} CARTS FREE`;
-  $("buildbtn").disabled = !sel.size || need > (data?.free_carts ?? 0);
+  const p = plan();
+  $("cartinfo").textContent = sel.size
+    ? `= ${p.carts} CART${p.carts === 1 ? "" : "S"} · ${p.totes} TOTES${p.left ? ` · ${p.left} WON'T FIT` : ""} · ${data?.free_carts ?? 0} FREE`
+    : `${data?.free_carts ?? 0} CARTS FREE`;
+  $("buildbtn").disabled = !sel.size || !p.carts;
 }
+function setMode(share) { shareMode = share; $("m1").classList.toggle("on", !share); $("m2").classList.toggle("on", share); $("ppt").hidden = !share; updateSel(); }
+$("m1").onclick = () => setMode(false); $("m2").onclick = () => setMode(true);
+$("pieces").addEventListener("input", updateSel);
 $("per").addEventListener("input", updateSel);
 
 $("buildbtn").onclick = async () => {
-  const per = Math.max(1, Number($("per").value) || 12);
-  if (!confirm(`Build carts from ${sel.size} orders, ${per} per cart?\nExpress orders go first, then oldest.`)) return;
+  const p = plan();
+  const how = shareMode ? `${p.per} totes per cart, up to ${p.pieces} pieces per tote (orders can share a tote)` : `${p.per} totes per cart, 1 order per tote`;
+  if (!confirm(`Build about ${p.carts} cart(s) from ${sel.size} orders?\n${how}.\nOrders are never split: an order only goes on a cart if it fits whole. Express first, then oldest.`)) return;
   $("buildbtn").disabled = true; $("buildbtn").textContent = "Building…";
-  const { data: r, error } = await sb.rpc("wms_build_carts", { p_order_ids: [...sel], p_per_cart: per });
+  const { data: r, error } = await sb.rpc("wms_build_carts", { p_order_ids: [...sel], p_totes_per_cart: p.per, p_pieces_per_tote: p.pieces });
   $("buildbtn").textContent = "Build carts";
   if (error) { await check(error); modal(`<h2>Could not build carts</h2><p class="bad">${esc(error.message)}</p>`); return loadOrders(); }
   sel.clear();
   const ERR = { NO_READY_ORDERS: "None of those orders are ready.", NO_FREE_CARTS: "All carts are in use." };
   modal(`<h2>${r.ok ? `${r.carts.length} cart${r.carts.length === 1 ? "" : "s"} built` : "No carts built"}</h2>
     ${r.error ? `<p class="bad">${esc(ERR[r.error] ?? r.error)}</p>` : ""}
-    ${(r.carts ?? []).length ? `<table style="margin-top:8px"><tr><th>Cart</th><th class="num">Orders</th><th class="num">Stops</th><th>Short of stock</th></tr>
-      ${r.carts.map((c) => `<tr><td><b>${esc(c.cart)}</b></td><td class="num">${c.orders}</td><td class="num">${c.stops}</td>
+    <p class="mono">${esc(how.toUpperCase())}</p>
+    ${(r.carts ?? []).length ? `<table style="margin-top:8px"><tr><th>Cart</th><th class="num">Orders</th><th class="num">Totes</th><th class="num">Units</th><th class="num">Stops</th><th>Short of stock</th></tr>
+      ${r.carts.map((c) => `<tr><td><b>${esc(c.cart)}</b></td><td class="num">${c.orders}</td><td class="num">${c.totes}</td><td class="num">${c.units}</td><td class="num">${c.stops}</td>
         <td>${(c.shortages ?? []).map((s) => `<span class="tag">${esc(s.sku)} ×${s.short}</span>`).join("") || "-"}</td></tr>`).join("")}</table>` : ""}
     ${(r.failed ?? []).length ? `<p class="bad" style="margin-top:8px">Not built: ${r.failed.map((f) => `${esc(f.cart)} (${esc(f.error)})`).join("; ")}</p>` : ""}
     ${(r.skipped ?? []).length ? `<p class="warn" style="margin-top:8px">Skipped ${r.skipped.length}: ${r.skipped.map((s) => `#${esc(s.order_number)} (${esc(s.reason.replace("_", " "))})`).join(", ")}</p>` : ""}
-    ${r.left_over ? `<p class="warn" style="margin-top:8px">${r.left_over} orders left over (not enough free carts).</p>` : ""}
-    <p class="mono" style="margin-top:10px">Pickers scan the cart, then one tote per order, to start.</p>`);
+    ${r.left_over ? `<p class="warn" style="margin-top:8px">${r.left_over} orders left in the queue (not enough free carts): ${(r.left_over_orders ?? []).slice(0, 20).map((n) => "#" + esc(n)).join(", ")}</p>` : ""}
+    <p class="mono" style="margin-top:10px">Pickers scan the cart, then one empty tote per tote number, to start.</p>`);
   loadOrders();
 };
 
@@ -197,7 +231,7 @@ async function loadCarts() {
   if (error) { await check(error); $("carts").innerHTML = `<p class="bad">${esc(error.message)}</p>`; return; }
   const open = d.filter((c) => c.status !== "completed");
   $("cartsum").textContent = `${open.length} CARTS OPEN · ${fmt(open.reduce((a, c) => a + c.orders, 0))} ORDERS · ${fmt(open.reduce((a, c) => a + (c.units - c.picked), 0))} UNITS TO PICK · ${d.length - open.length} PICKED TODAY`;
-  $("carts").innerHTML = d.length ? d.map((c) => { const [label, col] = SC[c.status] ?? [c.status, "var(--muted)"]; const pct = c.units ? Math.round(100 * c.picked / c.units) : 0;
+  $("carts").innerHTML = d.length ? d.map((c) => { const [label, col] = c.paused && !c.picker ? ["Needs a picker", "var(--orange)"] : c.paused ? ["Paused", "var(--amber)"] : SC[c.status] ?? [c.status, "var(--muted)"]; const pct = c.units ? Math.round(100 * c.picked / c.units) : 0;
     return `<div class="card" data-s="${c.session_id}"><h3>${esc(c.cart)} <span class="chip" style="background:${col}">${label}</span></h3>
       <div><b>${c.orders}</b> orders · <b>${c.units}</b> units · ${c.stops} stops</div>
       <div class="bar2"><i style="width:${pct}%"></i></div>
@@ -222,14 +256,15 @@ async function openCart(id) {
   if (error || !d) { await check(error); return; }
   const s = d.session; const [label] = SC[s.status] ?? [s.status];
   const canCancel = boss && ["draft", "assigned", "in_progress"].includes(s.status) && !d.picks.some((p) => p.picked > 0);
+  const canRelease = boss && ["draft", "assigned", "in_progress"].includes(s.status) && s.picker;
   $("detail").hidden = false;
   $("detail").innerHTML = `<div class="panel">
-    <div class="kicker"><h2>${esc(s.cart ?? "Cart")} · ${label}</h2><span class="mono">ROUTE ${esc((s.route ?? "").toUpperCase())}</span></div>
-    <div class="toolbar noprint"><span class="mono">Built ${new Date(s.created_at).toLocaleString("en-AU")}${s.created_by ? ` by ${esc(s.created_by)}` : ""}${s.picker ? ` · Picker ${esc(s.picker)}` : ""}</span>
-      <span style="flex:1"></span><button class="ghost" id="printcart">Print pick list</button>${canCancel ? `<button class="ghost" id="cancelcart" style="color:var(--red);border-color:var(--red)">Take cart apart</button>` : ""}</div>
+    <div class="kicker"><h2>${esc(s.cart ?? "Cart")} · ${label} · ${s.tote_slots ?? "-"} totes</h2><span class="mono">ROUTE ${esc((s.route ?? "").toUpperCase())}</span></div>
+    <div class="toolbar noprint"><span class="mono">Built ${new Date(s.created_at).toLocaleString("en-AU")}${s.created_by ? ` by ${esc(s.created_by)}` : ""}${s.picker ? ` · Picker ${esc(s.picker)}` : ""}${s.paused ? ` · ${s.picker ? "PAUSED" : "NEEDS A PICKER"} (${esc((s.pause_reason ?? "").replace(/_/g, " "))})` : ""}</span>
+      <span style="flex:1"></span><button class="ghost" id="printcart">Print pick list</button>${canRelease ? `<button class="ghost" id="releasecart">Unassign ${esc(s.picker)}</button>` : ""}${canCancel ? `<button class="ghost" id="cancelcart" style="color:var(--red);border-color:var(--red)">Take cart apart</button>` : ""}</div>
     <h3 style="margin:10px 0 6px">Orders on this cart</h3>
     <table><tr><th>Tote</th><th>Order</th><th>Customer</th><th>Service</th><th class="num">Picked</th><th>Status</th></tr>
-      ${d.orders.map((o) => `<tr><td class="bin">${esc(o.tote ?? "scan at start")}</td><td><b>#${esc(o.order_number)}</b>${o.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}${o.is_held ? ` <span class="chip amber">ON HOLD</span>` : ""}</td>
+      ${d.orders.map((o) => `<tr><td class="bin">${esc(o.tote ?? (o.slot ? `Tote ${o.slot}` : "scan at start"))}</td><td><b>#${esc(o.order_number)}</b>${o.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}${o.is_held ? ` <span class="chip amber">ON HOLD</span>` : ""}</td>
         <td>${esc(o.customer ?? "")}</td><td>${esc(o.service ?? "")}</td><td class="num">${o.picked ?? 0}/${o.units ?? 0}</td><td>${esc(o.status.replace("_", " "))}</td></tr>`).join("")}</table>
     <h3 style="margin:14px 0 6px">Pick list (walking order)</h3>
     <table class="picks"><tr><th class="num">#</th><th>Location</th><th></th><th>Product</th><th class="num">Qty</th><th class="num">Picked</th><th>Into tote / order</th></tr>
@@ -237,8 +272,15 @@ async function openCart(id) {
         <td>${p.image_url ? `<img src="${esc(p.image_url + (p.image_url.includes("?") ? "&" : "?") + "width=88")}" alt="">` : ""}</td>
         <td><b>${esc(p.name)}</b>${p.variant ? ` <span class="mono">${esc(p.variant)}</span>` : ""}<div class="split">${esc(p.sku)}</div></td>
         <td class="num"><b>${p.qty}</b></td><td class="num ${p.picked >= p.qty ? "ok" : p.status === "short" ? "bad" : ""}">${p.picked}${p.status === "short" ? " SHORT" : ""}</td>
-        <td class="split">${(p.split ?? []).map((x) => `${esc(x.tote ?? "#" + x.order_number)} ×${x.qty}`).join("<br>")}</td></tr>`).join("")}</table></div>`;
+        <td class="split">${(p.split ?? []).map((x) => `${esc(x.tote ?? (x.slot ? "Tote " + x.slot : ""))} #${esc(x.order_number)} ×${x.qty}`).join("<br>")}</td></tr>`).join("")}</table></div>`;
   $("printcart").onclick = () => window.print();
+  if (canRelease) $("releasecart").onclick = async () => {
+    const why = prompt(`Take ${s.cart} off ${s.picker}?\nThe cart stays together: its orders, totes and everything already picked stay on it, and any picker can scan it to carry on.\n\nReason (optional):`, "");
+    if (why === null) return;
+    const { data: r, error } = await sb.rpc("wms_release_cart", { p_session_id: id, p_reason: why || null });
+    if (error || !r.ok) { alert(error?.message ?? ({ FORBIDDEN: "Only supervisors and admins can do this.", NO_PICKER: "No picker on this cart." }[r.error] ?? r.error)); return; }
+    loadCarts(); openCart(id);
+  };
   if (canCancel) $("cancelcart").onclick = async () => {
     if (!confirm(`Take ${s.cart} apart? Its orders go back to Ready and the stock is released.`)) return;
     const { data: r, error } = await sb.rpc("wms_cancel_pick_session", { p_session_id: id });

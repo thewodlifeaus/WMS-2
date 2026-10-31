@@ -58,6 +58,10 @@ Deno.serve(async (req) => {
   // first run: last 14 days only (avoid importing years of history)
   const since = state?.cursor ?? new Date(Date.now() - 14 * 864e5).toISOString();
   const { data: wh } = await db.from("warehouses").select("id").order("created_at").limit(1).single();
+  // cancelled / labelled checks only need to start from the last run (or the last hour on the first run):
+  // everything imported is still pending, so older label/cancel events can't affect it
+  const sinceEvents = state?.cursor ?? new Date(Date.now() - 3600e3).toISOString();
+  const started = Date.now();
   let newest = since, imported = 0, cancelled = 0, unknownSkus = new Set<string>();
 
   try {
@@ -107,9 +111,12 @@ Deno.serve(async (req) => {
       }
     }
 
+    // save progress now, so a slow run never starts again from scratch
+    await db.from("sync_state").upsert({ system: "shipstation_orders", cursor: newest, last_run_at: new Date().toISOString() });
+
     // ---- cancelled in ShipStation -> cancel in WMS if not yet shipped -------
     for (let n = 1, pages = 1; n <= pages; n++) {
-      const res = await page("cancelled", since, n);
+      const res = await page("cancelled", sinceEvents, n);
       pages = res.pages;
       const ids = res.shipments.map((s) => s.shipment_id);
       if (ids.length) {
@@ -124,9 +131,10 @@ Deno.serve(async (req) => {
     }
 
     // ---- labelled outside the WMS (SkuVault / ShipStation) -> mark shipped ---
-    let shippedElsewhere = 0;
+    let shippedElsewhere = 0, cut = false;
     for (let n = 1, pages = 1; n <= pages; n++) {
-      const res = await page("label_purchased", since, n);
+      if (Date.now() - started > 100_000) { cut = true; break; }   // stay inside the edge function time limit
+      const res = await page("label_purchased", sinceEvents, n);
       pages = res.pages;
       const ids = res.shipments.map((s) => s.shipment_id);
       if (ids.length) {
@@ -137,8 +145,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    await db.from("sync_state").upsert({ system: "shipstation_orders", cursor: newest, last_run_at: new Date().toISOString(),
-      last_ok_at: new Date().toISOString(), last_error: null });
+    // everything up to this run's start has been seen (2 min overlap for safety)
+    const done = new Date(started - 120e3).toISOString();
+    await db.from("sync_state").upsert({ system: "shipstation_orders", cursor: !cut && done > newest ? done : newest,
+      last_run_at: new Date().toISOString(), last_ok_at: new Date().toISOString(), last_error: null });
     return Response.json({ ok: true, imported, cancelled, shipped_elsewhere: shippedElsewhere, unknown_skus: [...unknownSkus] });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

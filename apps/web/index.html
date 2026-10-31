@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css">
+<style>
+  .login{max-width:420px;margin:8vh auto;padding:0 16px}
+  .login .panel{display:grid;gap:14px}
+  .pin{letter-spacing:.5em;font-size:24px;text-align:center}
+  .menu{display:grid;gap:10px;margin-top:16px}
+  .menu a{display:flex;justify-content:space-between;align-items:center;min-height:56px;padding:0 16px;background:var(--surface);border:1px solid var(--rule);color:var(--ink);text-decoration:none;font-weight:800}
+</style>
+</head>
+<body>
+<div class="bar"><span class="logo">TWL</span><span class="mono" style="color:#ccc">WAREHOUSE SYSTEM</span></div>
+<main class="login">
+  <section id="signin" class="panel" hidden>
+    <div class="kicker"><h2>Sign in</h2><span class="mono">WMS.01</span></div>
+    <label><span class="mono">Username</span><input id="u" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+    <label><span class="mono">6-digit PIN</span><input id="p" class="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password"></label>
+    <button id="go" class="signal">Sign in</button>
+    <div id="err" class="err"></div>
+  </section>
+  <section id="home" hidden>
+    <div class="panel"><div class="kicker"><h2 id="hello">Hi</h2><span class="mono" id="role"></span></div>
+      <nav class="menu">
+        <a href="/search.html">Inventory search <span class="chip">FIND</span></a>
+        <a href="/tv.html">Warehouse TV dashboard <span class="chip">SCREEN</span></a>
+      </nav>
+      <p class="mono" style="margin-top:14px">Picking, receiving and packing screens are coming next.</p>
+      <button class="ghost" id="out" style="margin-top:14px;width:100%">Sign out</button>
+    </div>
+  </section>
+  <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
+</main>
+<script type="module">
+import { sb, signIn, me, signOut, esc } from "/js/app.js";
+const next = new URLSearchParams(location.search).get("next");
+const show = (id) => { for (const s of ["signin","home"]) document.getElementById(s).hidden = s !== id; };
+async function home(m) {
+  if (next) { location.href = next; return; }
+  if (m.role === "display") { location.href = "/tv.html"; return; }
+  document.getElementById("hello").textContent = `Hi ${m.name}`;
+  document.getElementById("role").textContent = m.role.toUpperCase();
+  show("home");
+}
+const { data } = await sb.auth.getSession();
+const current = data.session ? await me() : null;
+current ? home(current) : show("signin");
+async function go() {
+  const e = document.getElementById("err"); e.textContent = "";
+  try { home(await signIn(document.getElementById("u").value, document.getElementById("p").value)); }
+  catch (x) { e.textContent = x.message; }
+}
+document.getElementById("go").onclick = go;
+document.getElementById("p").addEventListener("keydown", (ev) => { if (ev.key === "Enter") go(); });
+document.getElementById("out").onclick = signOut;
+</script>
+</body>
+</html>

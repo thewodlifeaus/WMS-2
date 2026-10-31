@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/brand.css?v=3">
-<link rel="stylesheet" href="/css/tablet.css?v=1">
+<link rel="stylesheet" href="/css/tablet.css?v=2">
 </head>
 <body>
 <div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc" id="hdr">PICKING</span><span class="mono" style="color:#ccc" id="who"></span></div>
@@ -135,6 +135,9 @@ function pickScreen() {
     <div class="loc ${binOk ? "ok" : ""}"><div class="step">${binOk ? "✓ Location confirmed" : "Go to location, scan the location label"}</div><div class="big">${esc(t.bin)}</div></div>
     <div class="card prod">${t.image_url ? `<img src="${esc(t.image_url + (t.image_url.includes("?") ? "&" : "?") + "width=280")}" alt="">` : `<div class="noimg"></div>`}
       <div><div class="pname">${esc(t.name)}</div>${t.variant ? `<div class="pvar">${esc(t.variant)}</div>` : ""}<div class="psku">${esc(t.sku)}</div></div></div>
+    <div class="card inloc"><div><div class="step">Should be in this location</div><div class="inq"><b>${t.bin_on_hand ?? "-"}</b> <span class="mono">BEFORE YOU PICK</span></div></div>
+      <button class="ghost" id="fixcount" ${binOk ? "" : "disabled"}>${binOk ? "Count wrong? Fix it" : "Scan the location to fix the count"}</button></div>
+    ${t.bin_on_hand != null && t.bin_on_hand < left ? `<div class="msg warn">The WMS only shows ${t.bin_on_hand} here but you need ${left}. Count what's there.</div>` : ""}
     <div class="qtyrow"><div><div class="step">Pick</div><div class="huge">${left}</div></div>
       <div><div class="step">Put into</div><div class="totes">${(t.put_into ?? []).filter((x) => x.qty > x.qty_picked).map((x) =>
         `<span class="tote">${esc(x.basket_barcode ?? "#" + x.order_number)} ×${x.qty - x.qty_picked}<small>#${esc(x.order_number)}</small></span>`).join("")}</div></div></div>
@@ -143,6 +146,7 @@ function pickScreen() {
     <div class="btns"><button class="ghost" id="cant" style="color:var(--red);border-color:var(--red)">Can't pick this</button><button class="ghost" id="pause">Pause</button></div>`;
   $("pause").onclick = pauseBox;
   $("cant").onclick = () => cantPickBox(t);
+  if (binOk) $("fixcount").onclick = () => countBox(t);
   onScan = async (v) => {
     try {
       if (!binOk) {
@@ -233,6 +237,44 @@ function cantPickBox(t) {
         msg(r.kind === "missing" ? `${r.qty} × ${t.sku} marked MISSING. The packer will be alerted.` : `${r.qty} × ${t.sku} in the tote unscanned. The packer will check it.`, r.kind === "missing" ? "bad" : "warn");
       } catch (e) { $("modal").hidden = true; bad(); msg(e.message, "bad"); } };
     valid(); };
+  draw(); $("modal").hidden = false;
+}
+
+// quick count fix: set how many of this item are really in this location
+function countBox(t) {
+  const was = t.bin_on_hand ?? 0;
+  let q = String(was), reason = "", typed = false;
+  const REASONS = [["more_here", "More here than the WMS showed"], ["fewer_here", "Fewer here than the WMS showed"], ["damaged", "Damaged stock taken out"], ["other", "Other (write a note)"]];
+  const draw = () => {
+    const n = Number(q || 0), diff = n - was;
+    if (!reason || (reason === "more_here" && diff < 0) || (reason === "fewer_here" && diff > 0) || (reason === "damaged" && diff > 0) || (diff === 0 && reason !== "other")) reason = diff > 0 ? "more_here" : diff < 0 ? "fewer_here" : "";
+    $("mpanel").innerHTML = `<h2>Fix the count at ${esc(t.bin)}</h2>
+    <div class="mono">${esc(t.sku)}${t.variant ? " · " + esc(t.variant) : ""}</div>
+    <div class="qtyrow" style="align-items:center"><div><div class="step">WMS says</div><div class="qtyshow" style="font-size:40px;text-align:left">${was}</div></div>
+      <div style="text-align:right"><div class="step">Actually here</div><div class="qtyshow" id="cv">${q || "0"}</div></div></div>
+    <div class="msg ${diff === 0 ? "" : diff > 0 ? "good" : "warn"}" style="font-size:18px">${diff === 0 ? "Count every one in the location, including the ones you're about to pick, then type the total." : diff > 0 ? `Adds ${diff} to this location.` : `Takes ${-diff} out of this location.`}</div>
+    <div class="pad">${[1,2,3,4,5,6,7,8,9].map((d) => `<button data-n="${d}">${d}</button>`).join("")}<button data-n="C">Clear</button><button data-n="0">0</button><button data-n="B">⌫</button></div>
+    ${diff !== 0 ? `<div class="step">Why?</div><div class="opts">${REASONS.filter(([k]) => !(k === "more_here" && diff < 0) && !(k === "fewer_here" && diff > 0) && !(k === "damaged" && diff > 0))
+        .map(([k, l]) => `<button data-r="${k}" class="${k === reason ? "on" : ""}">${l}</button>`).join("")}</div>
+      ${reason === "other" ? `<input id="note" placeholder="What happened?" style="font-size:18px">` : ""}
+      <div class="mono">Recorded against your name.</div>` : ""}
+    <div class="btns"><button class="ghost" id="cno">Cancel</button><button class="signal" id="cyes" ${diff === 0 || !reason ? "disabled" : ""}>Save count: ${n}</button></div>`;
+    $("mpanel").querySelectorAll("[data-n]").forEach((b) => b.onclick = () => { const d = b.dataset.n;
+      q = d === "C" ? "" : d === "B" ? q.slice(0, -1) : (!typed ? d : (q + d).replace(/^0+(?=\d)/, "")).slice(0, 4); typed = d !== "C" && d !== "B" ? true : typed; draw(); });
+    $("mpanel").querySelectorAll("[data-r]").forEach((b) => b.onclick = () => { reason = b.dataset.r; draw(); });
+    const v = () => { $("cyes").disabled = !(diff !== 0 && reason && (reason !== "other" || $("note")?.value.trim())); };
+    $("note")?.addEventListener("input", v); v();
+    $("cno").onclick = () => { $("modal").hidden = true; };
+    $("cyes").onclick = async () => { $("cyes").disabled = true;
+      try {
+        const r = await rpc("wms_pick_adjust_bin", { p_task_id: t.id, p_new_qty: n, p_reason: reason, p_note: $("note")?.value.trim() || null });
+        if (!r.ok) { bad();
+          if (r.error === "BELOW_RESERVED") { $("modal").hidden = true; return msg(`Can't set it below ${r.reserved}: ${r.reserved} are already booked for picks here (${r.this_pick} for this stop). If there aren't enough, use "Can't pick this" → Not enough in the location.`, "bad"); }
+          $("modal").hidden = true; return msg({ CART_PAUSED: "Cart is paused.", NOT_YOUR_CART: "This isn't your cart.", NOTE_REQUIRED: "Write a note.", NOT_ACTIVE: "This stop is finished." }[r.error] ?? r.error, "bad"); }
+        $("modal").hidden = true; good(); await refresh();
+        msg(`✓ ${t.bin} now has ${r.after} (was ${r.before}).`, "good");
+      } catch (e) { $("modal").hidden = true; bad(); msg(e.message, "bad"); } };
+  };
   draw(); $("modal").hidden = false;
 }
 

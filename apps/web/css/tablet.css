@@ -44,3 +44,6 @@
   .stat b{display:block;font:900 30px "IBM Plex Mono",monospace;color:var(--ink)}
   .flash-bad{animation:fb .6s 2} @keyframes fb{50%{background:#f6c8c8}}
   a.tbtn{display:flex;align-items:center;justify-content:center;min-height:64px;font-weight:800;font-size:18px;border:1px solid var(--ink);color:var(--ink);text-decoration:none;background:transparent}
+  .inloc{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px}
+  .inq b{font:900 44px/1 "IBM Plex Mono",monospace;color:var(--ink)}
+  .inloc button{min-height:52px;font-size:16px}

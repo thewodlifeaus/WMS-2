@@ -42,11 +42,19 @@ begin
   res := wms_pack_scan(ship, 'DK111');
   res := wms_pack_scan(ship, 'DK111');
   assert res->>'error' = 'ALREADY_PACKED', '3rd tee rejected: ' || res::text;
-  -- SKU label accepted; cap has no stock -> warning but still packs; last scan closes the box
-  res := wms_pack_scan(ship, 'DK-CAP');
+  -- manual pass: must be confirmed and have a reason; recorded against the packer
+  res := wms_pack_manual_pass(ship, (select id from order_lines where order_id = o1 and sku = 'DK-CAP'), 'no_barcode', false);
+  assert res->>'error' = 'NOT_CONFIRMED', res::text;
+  res := wms_pack_manual_pass(ship, (select id from order_lines where order_id = o1 and sku = 'DK-CAP'), 'other', true);
+  assert res->>'error' = 'NOTE_REQUIRED', res::text;
+  res := wms_pack_manual_pass(ship, (select id from order_lines where order_id = o1 and sku = 'DK-TEE'), 'no_barcode', true);
+  assert res->>'error' = 'ALREADY_PACKED', 'manual pass cannot exceed the order: ' || res::text;
+  -- cap has no stock -> warning but still passes; last unit closes the box
+  res := wms_pack_manual_pass(ship, (select id from order_lines where order_id = o1 and sku = 'DK-CAP'), 'damaged_label', true);
   assert (res->>'auto_closed')::boolean, res::text;
   assert res->'warnings'->0->>'type' = 'NO_STOCK_RECORDED', res::text;
   assert (select weight_source from shipments where id = ship) = 'estimate', 'estimated weight';
+  assert (select count(*) from pack_manual_passes where shipment_id = ship and staff_id = u and reason = 'damaged_label') = 1, 'manual pass recorded';
 
   -- scale weight
   res := wms_pack_set_weight(ship, 0);

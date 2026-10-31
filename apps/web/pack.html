@@ -41,6 +41,14 @@
   .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
   .modal .panel{max-width:520px;width:100%}
   .modal h2{margin-bottom:8px}
+  .passbtn{min-height:36px;padding:0 10px;font-size:13px;margin-top:6px}
+  .mp-prod{display:grid;grid-template-columns:96px 1fr;gap:12px;align-items:center;padding:10px;background:var(--surface);border:1px solid var(--rule);margin:10px 0}
+  .mp-prod img,.mp-prod .noimg{width:96px;height:96px;object-fit:cover}
+  .mp-warn{background:#fbeaea;border-left:6px solid var(--red);color:var(--red);padding:12px;font-weight:800;margin:10px 0}
+  .mp-check{display:flex;gap:10px;align-items:flex-start;font-weight:700;margin:10px 0}
+  .mp-check input{width:24px;min-height:24px;flex:none;margin-top:2px}
+  #mp .row2 button.danger{background:var(--red);border-color:var(--red);color:#fff}
+  #mp .row2 button:disabled{background:var(--rule);border-color:var(--rule);color:var(--muted);cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -89,6 +97,23 @@
     </div>
   </aside>
 </main>
+
+<div class="modal" id="mp" hidden><div class="panel">
+  <h2>Pass this item by hand?</h2>
+  <div class="mp-prod" id="mpprod"></div>
+  <div class="mp-warn">Only pass this item if you are absolutely sure it is the correct product, size and colour.
+    Every manual pass is recorded against your name. Passing incorrect products may result in disciplinary action.</div>
+  <label><span class="mono">Why can't it be scanned?</span>
+    <select id="mpreason"><option value="">Choose a reason…</option>
+      <option value="no_barcode">Item has no barcode</option>
+      <option value="damaged_label">Barcode label damaged or missing</option>
+      <option value="barcode_not_recognised">Barcode not recognised by the WMS</option>
+      <option value="scanner_fault">Scanner not working</option>
+      <option value="other">Other (write a note)</option></select></label>
+  <label id="mpnotebox" hidden style="margin-top:8px;display:block"><span class="mono">Note</span><input id="mpnote" maxlength="200"></label>
+  <label class="mp-check"><input type="checkbox" id="mpok"><span>I have checked the item in my hand. It is exactly this product, size and colour.</span></label>
+  <div class="row2"><button class="ghost" id="mpno">Cancel</button><button class="danger" id="mpyes" disabled>Yes, pass 1 unit</button></div>
+</div></div>
 
 <div class="modal" id="modal" hidden><div class="panel"><h2 id="mtitle"></h2><p id="mbody" style="margin-bottom:14px"></p><div class="row2"><button class="ghost" id="mno">Cancel</button><button class="signal" id="myes">OK</button></div></div></div>
 
@@ -201,7 +226,7 @@ $("testprint").onclick = () => {
 // ---------- packing ----------
 $("reprint").disabled = !lastShipment;
 const scan = $("scan");
-setInterval(() => { if (document.activeElement !== scan && document.activeElement !== $("manual") && $("modal").hidden) scan.focus(); }, 1500);
+setInterval(() => { if (document.activeElement !== scan && document.activeElement !== $("manual") && $("modal").hidden && $("mp").hidden) scan.focus(); }, 1500);
 
 function render(v) {
   view = v;
@@ -213,7 +238,8 @@ function render(v) {
   $("ometa").textContent = [v.order.customer, [v.order.city, v.order.state, v.order.country].filter(Boolean).join(" "), v.order.requested_service].filter(Boolean).join(" · ");
   $("lines").innerHTML = (v.lines ?? []).map((l) => `<div class="line ${l.remaining === 0 ? "done" : ""}" data-sku="${esc(l.sku)}">
       ${l.image_url ? `<img src="${esc(l.image_url + (l.image_url.includes("?") ? "&" : "?") + "width=128")}" alt="">` : `<div class="noimg"></div>`}
-      <div><div><b>${esc(l.name)}</b> ${l.variant ? `<span class="mono">${esc(l.variant)}</span>` : ""}</div><div class="sku">${esc(l.sku)}</div></div>
+      <div><div><b>${esc(l.name)}</b> ${l.variant ? `<span class="mono">${esc(l.variant)}</span>` : ""}</div><div class="sku">${esc(l.sku)}</div>
+        ${v.status === "packing" && l.remaining > 0 ? `<button class="ghost passbtn" data-pass="${esc(l.order_line_id)}">Can't scan? Pass manually</button>` : ""}</div>
       <div class="q">${l.qty_packed}/${l.qty_ordered}</div></div>`).join("");
   refreshShip();
 }
@@ -311,6 +337,36 @@ async function ship(force = false) {
   render(null); $("manual").value = "";
 }
 $("ship").onclick = () => ship();
+
+// ---------- manual pass (1 unit, confirmed, reason, recorded against the packer) ----------
+let mpLine = null;
+const mpValid = () => { $("mpyes").disabled = !($("mpok").checked && $("mpreason").value && ($("mpreason").value !== "other" || $("mpnote").value.trim())); };
+for (const id of ["mpok", "mpreason", "mpnote"]) { $(id).addEventListener("input", mpValid); $(id).addEventListener("change", mpValid); }
+$("mpreason").addEventListener("change", () => { $("mpnotebox").hidden = $("mpreason").value !== "other"; });
+$("lines").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-pass]"); if (!b || !view) return;
+  const l = view.lines.find((x) => x.order_line_id === b.dataset.pass); if (!l) return;
+  mpLine = l;
+  $("mpprod").innerHTML = `${l.image_url ? `<img src="${esc(l.image_url + (l.image_url.includes("?") ? "&" : "?") + "width=192")}" alt="">` : `<div class="noimg"></div>`}
+    <div><div style="font-size:18px"><b>${esc(l.name)}</b></div>${l.variant ? `<div class="mono" style="font-size:14px">${esc(l.variant)}</div>` : ""}
+    <div class="sku" style="font-size:16px;margin-top:4px">${esc(l.sku)}</div><div class="mono" style="margin-top:4px">${l.remaining} STILL NEEDED ON THIS ORDER</div></div>`;
+  $("mpreason").value = ""; $("mpnote").value = ""; $("mpok").checked = false; $("mpnotebox").hidden = true; mpValid();
+  $("mp").hidden = false; $("mpreason").focus();
+});
+$("mpno").onclick = () => { $("mp").hidden = true; mpLine = null; };
+$("mpyes").onclick = async () => {
+  if (!mpLine || $("mpyes").disabled) return;
+  $("mpyes").disabled = true;
+  const { data, error } = await sb.rpc("wms_pack_manual_pass", { p_shipment_id: view.shipment_id, p_order_line_id: mpLine.order_line_id,
+    p_reason: $("mpreason").value, p_confirmed: $("mpok").checked, p_note: $("mpnote").value.trim() || null });
+  $("mp").hidden = true; mpLine = null;
+  if (error) return failed(error);
+  if (data.shipment_id) render(data);
+  if (!data.ok) { bad(); return say(ERR[data.error] ?? data.error, "bad"); }
+  const w = (data.warnings ?? [])[0];
+  if (data.auto_closed) { done(); say("All items done (1 passed by hand). Put the box on the scale, then press SHIP.", "good"); }
+  else { good(); say(w ? w.message : `${data.sku} passed by hand ✓ (recorded)`, w ? "warn" : "good"); }
+};
 
 $("reprint").onclick = async () => {
   if (!lastShipment) return;

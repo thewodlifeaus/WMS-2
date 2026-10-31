@@ -5,6 +5,7 @@
 // source for the WMS: each "pending" ShipStation v2 shipment = one order to pick.
 //   - new pending shipments  -> orders + order_lines (SKU matched to products)
 //   - shipments cancelled in ShipStation -> WMS order cancelled (if not shipped)
+//   - labelled outside the WMS (SkuVault, during the changeover) -> marked shipped
 // Bundles: ShipStation items carry the component SKU; bundle_sku is ignored.
 // =============================================================================
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -31,10 +32,31 @@ async function page(status: string, since: string, n: number) {
   return await r.json() as { shipments: SsShipment[]; pages: number };
 }
 
-Deno.serve(async () => {
+Deno.serve(async (req) => {
+  // only pg_cron (or an admin with the cron secret) may run this
+  const { data: sec } = await db.from("app_secrets").select("value").eq("name", "cron_secret").single();
+  if (!sec?.value || req.headers.get("x-cron-secret") !== sec.value) return Response.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
+  const body = await req.json().catch(() => ({}));
+
+  // check mode: prove the API key works and count what is waiting, write nothing
+  if (body.check) {
+    const q = new URLSearchParams({ shipment_status: "pending", page_size: "100", sort_by: "created_at", sort_dir: "desc" });
+    const r = await fetch(`${SS}/shipments?${q}`, { headers: hdr });
+    if (!r.ok) return Response.json({ ok: false, status: r.status, error: (await r.text()).slice(0, 300) });
+    const j = await r.json() as { shipments: (SsShipment & { store_id?: string })[]; total: number; pages: number };
+    const byStore: Record<string, number> = {};
+    for (const s of j.shipments) byStore[s.store_id ?? "none"] = (byStore[s.store_id ?? "none"] ?? 0) + 1;
+    const skus = [...new Set(j.shipments.flatMap((s) => s.items.map((i) => i.sku).filter(Boolean)))] as string[];
+    const { data: known } = await db.from("products").select("sku").in("sku", skus);
+    return Response.json({ ok: true, pending_total: j.total, pages: j.pages, first_page_by_store: byStore,
+      newest: j.shipments[0]?.created_at, oldest_on_page: j.shipments.at(-1)?.created_at,
+      first_page_skus: skus.length, skus_known_to_wms: known?.length ?? 0,
+      unknown_sample: skus.filter((k) => !(known ?? []).some((p) => p.sku === k)).slice(0, 10) });
+  }
+
   const { data: state } = await db.from("sync_state").select("*").eq("system", "shipstation_orders").maybeSingle();
-  // first run: last 3 days only (avoid importing years of history)
-  const since = state?.cursor ?? new Date(Date.now() - 3 * 864e5).toISOString();
+  // first run: last 14 days only (avoid importing years of history)
+  const since = state?.cursor ?? new Date(Date.now() - 14 * 864e5).toISOString();
   const { data: wh } = await db.from("warehouses").select("id").order("created_at").limit(1).single();
   let newest = since, imported = 0, cancelled = 0, unknownSkus = new Set<string>();
 
@@ -66,6 +88,7 @@ Deno.serve(async () => {
           priority: /express/i.test(s.requested_shipment_service ?? "") ? 50 : 100,
           ordered_at: s.created_at, raw: s,
           status: lines.every((l) => bySku.has(l.sku!)) ? "awaiting_pick" : "on_hold",
+          is_held: !lines.every((l) => bySku.has(l.sku!)),
           hold_reason: lines.every((l) => bySku.has(l.sku!)) ? null : "Unknown SKU - add product to WMS",
         }).select("id").single();
         if (error) { console.error(s.shipment_number, error.message); continue; }
@@ -100,9 +123,23 @@ Deno.serve(async () => {
       }
     }
 
+    // ---- labelled outside the WMS (SkuVault / ShipStation) -> mark shipped ---
+    let shippedElsewhere = 0;
+    for (let n = 1, pages = 1; n <= pages; n++) {
+      const res = await page("label_purchased", since, n);
+      pages = res.pages;
+      const ids = res.shipments.map((s) => s.shipment_id);
+      if (ids.length) {
+        const { data } = await db.from("orders")
+          .update({ status: "shipped", hold_reason: "Shipped outside the WMS" })
+          .in("shipstation_shipment_id", ids).in("status", ["awaiting_pick", "allocated", "on_hold"]).select("id");
+        shippedElsewhere += data?.length ?? 0;
+      }
+    }
+
     await db.from("sync_state").upsert({ system: "shipstation_orders", cursor: newest, last_run_at: new Date().toISOString(),
       last_ok_at: new Date().toISOString(), last_error: null });
-    return Response.json({ ok: true, imported, cancelled, unknown_skus: [...unknownSkus] });
+    return Response.json({ ok: true, imported, cancelled, shipped_elsewhere: shippedElsewhere, unknown_skus: [...unknownSkus] });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await db.from("sync_state").upsert({ system: "shipstation_orders", last_run_at: new Date().toISOString(), last_error: msg });

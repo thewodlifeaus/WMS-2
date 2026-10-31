@@ -133,7 +133,7 @@ begin
   assert (res->>'ok')::boolean, res::text;
   assert (select weight_grams from shipments where id = ship) = 510, 'weight from products: 2x180 + 150';
   perform wms_record_label(ship, true, 'se-TEST', 'se-LBL', 'TEST123', 'https://example/label.pdf', 9.95,
-                           'se-1821526', 'au_post_parcel_post_signature_3D85', 12345);
+                           'se-1821526', 'au_post_parcel_post_signature_3D85', true);
   assert (select status from orders where id = o1) = 'shipped', 'order shipped';
 
   -- ---- hyper picking -------------------------------------------------------------

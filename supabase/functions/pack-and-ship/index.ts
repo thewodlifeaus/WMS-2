@@ -132,7 +132,9 @@ Deno.serve(async (req) => {
         : chooseService(order.requested_service ?? ssShip.requested_shipment_service, ssShip.ship_to?.country_code));
     if (!service) throw new Error("NEEDS_SERVICE: no carrier/service on this order (international?). Set it in ShipStation, then try again.");
 
-    const base = Object.fromEntries(Object.entries(ssShip).filter(([k]) => !READ_ONLY.includes(k)));
+    const base: Record<string, unknown> = Object.fromEntries(Object.entries(ssShip).filter(([k]) => !READ_ONLY.includes(k)));
+    // ShipStation rejects ship_from + warehouse_id together: the warehouse wins
+    if (base.warehouse_id) delete base.ship_from;
     const packages = [{
       package_code: sh.package_types?.carrier_package_code ?? "package",
       weight: { value: sh.weight_grams, unit: "gram" },
@@ -146,9 +148,11 @@ Deno.serve(async (req) => {
     let label;
     if (TEST_LABELS || alreadyLabelled) {
       // a copy of the order: the real ShipStation order is left untouched
-      const copy = { ...base, ...service, packages };
-      delete (copy as any).external_shipment_id;
-      delete (copy as any).shipment_number;
+      // only the fields a label needs (no order ids, so ShipStation sees a brand-new shipment)
+      const keep = ["ship_to", "ship_from", "warehouse_id", "return_to", "confirmation", "customs",
+                    "advanced_options", "insurance_provider", "is_return", "ship_date"];
+      const copy: Record<string, unknown> = { ...service, packages };
+      for (const k of keep) if (base[k] != null) copy[k] = base[k];
       label = await ss("POST", `/v2/labels`, sh.id, TEST_LABELS ? "create_test_label" : "create_extra_label",
                        { shipment: copy, test_label: TEST_LABELS, ...labelOpts });
     } else {

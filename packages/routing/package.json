@@ -1,0 +1,11 @@
+{
+  "name": "@twl-wms/routing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Snake / zigzag pick routing for the TWL WMS (mirrors SQL wms_route_key)",
+  "main": "src/route.ts",
+  "scripts": {
+    "test": "node --experimental-strip-types --no-warnings --test test/route.test.ts"
+  }
+}

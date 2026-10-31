@@ -71,15 +71,28 @@ document.getElementById("go").onclick = go;
 document.getElementById("p").addEventListener("keydown", (ev) => { if (ev.key === "Enter") go(); });
 document.getElementById("out").onclick = signOut;
 document.getElementById("savepin").onclick = async () => {
+  const btn = document.getElementById("savepin");
+  if (btn.disabled) return;
   const msg = document.getElementById("pinmsg"); msg.style.color = ""; msg.textContent = "";
   const a = document.getElementById("np1").value.trim(), b = document.getElementById("np2").value.trim();
   if (!/^\d{6}$/.test(a)) { msg.textContent = "PIN must be exactly 6 digits."; return; }
   if (a !== b) { msg.textContent = "The two PINs don't match."; return; }
+  btn.disabled = true; btn.textContent = "Saving…";
   const { data, error } = await sb.functions.invoke("staff-admin", { body: { action: "set_pin", username: me_.username, pin: a } });
-  if (error || !data?.ok) { msg.textContent = "Could not save. Try again."; return; }
-  document.getElementById("np1").value = document.getElementById("np2").value = "";
-  msg.style.color = "var(--green)"; msg.textContent = "Saved. Use your new PIN next time you sign in.";
+  if (error || !data?.ok) {
+    let why = "";
+    try { why = (await error.context.json()).error ?? ""; } catch {}
+    msg.textContent = why === "NOT_SIGNED_IN" ? "You have been signed out. Sign in again, then try once more." : "Could not save. Try again.";
+    btn.disabled = false; btn.textContent = "Save new PIN"; return;
+  }
+  // Changing a PIN signs you out everywhere, so sign in again with the new one.
+  await sb.auth.signOut({ scope: "local" });
+  location.href = "/index.html?pin=changed";
 };
+if (new URLSearchParams(location.search).get("pin") === "changed") {
+  const e = document.getElementById("err"); e.style.color = "var(--green)";
+  e.textContent = "PIN changed. Sign in with your new PIN.";
+}
 </script>
 </body>
 </html>

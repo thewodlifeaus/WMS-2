@@ -135,12 +135,16 @@ Deno.serve(async (req) => {
     const base: Record<string, unknown> = Object.fromEntries(Object.entries(ssShip).filter(([k]) => !READ_ONLY.includes(k)));
     // ShipStation rejects ship_from + warehouse_id together: the warehouse wins
     if (base.warehouse_id) delete base.ship_from;
+    // Box: a WMS box type if the packer chose one, otherwise keep ShipStation's own package
+    // (its carrier package code + dimensions) and only replace the weight, like SkuVault does.
+    const ssPkg = (ssShip.packages ?? [])[0] ?? {};
+    const ssDims = ssPkg.dimensions && ssPkg.dimensions.length > 0 ? ssPkg.dimensions : null;
     const packages = [{
-      package_code: sh.package_types?.carrier_package_code ?? "package",
+      package_code: sh.package_types?.carrier_package_code ?? ssPkg.package_code ?? "package",
       weight: { value: sh.weight_grams, unit: "gram" },
       dimensions: sh.length_cm
         ? { unit: "centimeter", length: Number(sh.length_cm), width: Number(sh.width_cm), height: Number(sh.height_cm) }
-        : undefined,
+        : (ssDims ?? { unit: "centimeter", length: 10, width: 10, height: 10 }),
       label_messages: { reference1: `#${order.order_number}`, reference2: null, reference3: null },
     }];
     const labelOpts = { label_format: "pdf", label_layout: "4x6", label_download_type: "url" };

@@ -28,6 +28,11 @@
   .seg button.on{background:#fff;color:#111}
   table input[type=checkbox]{width:20px;min-height:20px}
   td{font-size:14px} tr.sel td{background:#eef1f8}
+  .grp{display:inline-block;font:800 11px Archivo,sans-serif;letter-spacing:.04em;padding:3px 7px;color:#fff;white-space:nowrap}
+  .types{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-4px 0 10px}
+  .types button{min-height:36px;padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink);border:1px solid var(--rule);font-weight:800;display:flex;gap:6px;align-items:center}
+  .types button.on{border:2px solid var(--ink)}
+  .types b{font:600 15px "IBM Plex Mono",monospace}
   .tag{display:inline-block;font:600 10px "IBM Plex Mono",monospace;padding:2px 5px;border:1px solid var(--rule);margin:1px;background:var(--panel)}
   .ok{color:var(--green);font-weight:800} .bad{color:var(--red);font-weight:800} .warn{color:var(--amber);font-weight:800}
   .carts{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
@@ -57,11 +62,12 @@
       <label><span class="mono">Search</span><input id="q" placeholder="Order #, name, service or SKU"></label>
       <div style="display:grid;gap:4px"><span class="mono last" id="last"></span><button id="pull" class="ghost" hidden>Pull orders from ShipStation</button></div>
     </div>
+    <div class="types" id="types"></div>
     <div id="err" class="err"></div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th><input type="checkbox" id="all" title="Select all shown"></th><th>Order</th><th>Customer</th><th class="hide-sm">Ship to</th>
+      <thead><tr><th><input type="checkbox" id="all" title="Select all shown"></th><th>Order</th><th>Type</th><th>Customer</th><th class="hide-sm">Ship to</th>
         <th>Shipping service</th><th class="hide-sm">Tags</th><th class="num">Units</th><th>Stock</th><th class="hide-sm">Ordered</th><th>Status</th></tr></thead>
-      <tbody id="rows"><tr><td colspan="10" class="mono">Loading…</td></tr></tbody>
+      <tbody id="rows"><tr><td colspan="11" class="mono">Loading…</td></tr></tbody>
     </table></div>
     <div class="build" id="build" hidden>
       <span><b id="selcount">0</b> <span class="mono">ORDERS SELECTED</span></span>
@@ -110,6 +116,14 @@ const ago = (t) => { if (!t) return "-"; const h = (Date.now() - new Date(t)) / 
 // ---------------- orders ----------------
 const VIEWS = [["ready","Ready to cart","var(--green)"],["no_service","No shipping service","var(--red)"],["on_hold","On hold","var(--amber)"],["in_progress","On a cart / packing","var(--blue)"],["all","All open",""]];
 let view = "ready", data = null, sel = new Set(), timer;
+// order types: how SkuVault splits orders (ShipStation tag + country + pickup service), one type per cart
+const GROUPS = [["REGS","Regular","#2f5bd3"],["PRIO_AU","Priority AU","#c2185b"],["PRIO_INT","International","#6a1b9a"],
+  ["ICON","The Iconic","#111111"],["OPENFR8","OpenFreight","#00796b"],["PKUP","Warehouse pickup","#e65100"],["OTHER","Other","#757575"]];
+const GN = Object.fromEntries(GROUPS.map(([k, l, c]) => [k, { label: l, col: c }]));
+const grpBadge = (g) => (g ?? "").split("+").filter(Boolean).map((k) => `<span class="grp" style="background:${GN[k]?.col ?? "#757575"}">${esc(GN[k]?.label ?? k)}</span>`).join(" ");
+let typeF = "ALL", skuF = "all";
+const shown = () => (data?.orders ?? []).filter((o) => (typeF === "ALL" || o.group === typeF)
+  && (skuF === "all" || (skuF === "single" ? o.lines === 1 : o.lines > 1)));
 async function loadOrders() {
   const { data: d, error } = await sb.rpc("wms_order_queue", { p_view: view, p_search: $("q").value.trim() || null });
   if (error) { await check(error); $("err").textContent = error.message; return; }
@@ -119,7 +133,8 @@ async function loadOrders() {
       ${col ? `<span class="dot" style="background:${col}"></span>` : ""}${label} <b>${fmt(k === "all" ? s.ready + s.no_service + s.on_hold + s.in_progress : s[k])}</b></button>`).join("")
     + (s.no_stock ? `<span class="chipbtn" style="cursor:default"><span class="dot" style="background:var(--red)"></span>Ready but short of stock <b>${fmt(s.no_stock)}</b></span>` : "");
   for (const id of [...sel]) if (!d.orders.some((o) => o.id === id && o.ready === "ready")) sel.delete(id);
-  $("rows").innerHTML = d.orders.length ? d.orders.map(row).join("") : `<tr><td colspan="10">No orders here.</td></tr>`;
+  renderTypes();
+  loadOrdersRender();
   $("build").hidden = !(boss && view === "ready");
   $("all").disabled = !(boss && view === "ready");
   updateSel();
@@ -135,6 +150,7 @@ function row(o) {
   return `<tr class="${sel.has(o.id) ? "sel" : ""}">
     <td>${can ? `<input type="checkbox" data-id="${o.id}" ${sel.has(o.id) ? "checked" : ""}>` : ""}</td>
     <td><b>#${esc(o.order_number)}</b>${o.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}</td>
+    <td>${grpBadge(o.group)}</td>
     <td>${esc(o.customer ?? "")}</td>
     <td class="hide-sm">${esc([o.city, o.state, o.country !== "AU" ? o.country : ""].filter(Boolean).join(" "))}</td>
     <td>${esc(o.service ?? "")}${o.service_code ? `<div class="split">${esc(o.service_code)}</div>` : ""}</td>
@@ -148,18 +164,41 @@ $("chips").addEventListener("click", (e) => { const b = e.target.closest("[data-
 $("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(loadOrders, 300); });
 $("rows").addEventListener("change", (e) => { const c = e.target.closest("input[data-id]"); if (!c) return;
   c.checked ? sel.add(c.dataset.id) : sel.delete(c.dataset.id); c.closest("tr").classList.toggle("sel", c.checked); updateSel(); });
-$("all").addEventListener("change", () => { for (const o of data.orders) if (o.ready === "ready") $("all").checked ? sel.add(o.id) : sel.delete(o.id); loadOrdersRender(); });
+$("all").addEventListener("change", () => { for (const o of shown()) if (o.ready === "ready") $("all").checked ? sel.add(o.id) : sel.delete(o.id); loadOrdersRender(); });
 $("pickfirst").onclick = () => { sel.clear(); const n = Number($("firstn").value) || 0;
-  for (const o of data.orders.filter((x) => x.ready === "ready" && x.stock_ok).slice(0, n)) sel.add(o.id); loadOrdersRender(); };
-function loadOrdersRender() { $("rows").innerHTML = data.orders.map(row).join(""); updateSel(); }
+  for (const o of shown().filter((x) => x.ready === "ready" && x.stock_ok).slice(0, n)) sel.add(o.id); loadOrdersRender(); };
+function loadOrdersRender() { const r = shown(); $("rows").innerHTML = r.length ? r.map(row).join("") : `<tr><td colspan="11">No orders here.</td></tr>`; updateSel(); }
+function renderTypes() {
+  const g = data?.groups ?? {}; const total = Object.values(g).reduce((a, n) => a + n, 0);
+  $("types").innerHTML = `<span class="mono">TYPE</span><button data-t="ALL" class="${typeF === "ALL" ? "on" : ""}">All types <b>${fmt(total)}</b></button>`
+    + GROUPS.filter(([k]) => g[k] || typeF === k).map(([k, l, c]) => `<button data-t="${k}" class="${typeF === k ? "on" : ""}"><span style="width:10px;height:10px;border-radius:50%;background:${c}"></span>${esc(l)} <b>${fmt(g[k] ?? 0)}</b></button>`).join("")
+    + `<span style="width:16px"></span><span class="mono">ITEMS</span>`
+    + [["all","Any"],["single","1 SKU only"],["multi","2+ SKUs"]].map(([k, l]) => `<button data-k="${k}" class="${skuF === k ? "on" : ""}">${l}</button>`).join("");
+}
+$("types").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-t]"), k = e.target.closest("[data-k]");
+  if (t) typeF = t.dataset.t; else if (k) skuF = k.dataset.k; else return;
+  // keep only selected orders that are still on screen
+  const vis = new Set(shown().map((o) => o.id)); for (const id of [...sel]) if (!vis.has(id)) sel.delete(id);
+  renderTypes(); loadOrdersRender();
+});
 let shareMode = false;
 // same packing rules as the database: whole orders only, express first then oldest
+// selected orders split by type: each type is built onto its own carts
+const selByGroup = () => { const m = new Map(); for (const o of (data?.orders ?? []).filter((x) => sel.has(x.id))) { if (!m.has(o.group)) m.set(o.group, []); m.get(o.group).push(o); } return m; };
 function plan() {
   const per = Math.max(1, Math.min(48, Number($("per").value) || 12));
   const pieces = shareMode ? Math.max(1, Number($("pieces").value) || 6) : null;
-  const queue = (data?.orders ?? []).filter((o) => sel.has(o.id));
+  let carts = 0, totes = 0, left = 0; const free = data?.free_carts ?? 0; const groups = selByGroup();
+  for (const [, orders] of groups) {
+    const r = planOne(orders, per, pieces, shareMode, free - carts);
+    carts += r.carts; totes += r.totes; left += r.left;
+  }
+  return { carts, totes, left, per, pieces, groups: groups.size };
+}
+function planOne(queue, per, pieces, shareMode, free) {
   const used = new Array(queue.length).fill(false);
-  let carts = 0, totes = 0, free = data?.free_carts ?? 0;
+  let carts = 0, totes = 0;
   while (used.includes(false) && carts < free) {
     const slots = []; let placed = 0;
     queue.forEach((o, i) => {
@@ -173,13 +212,13 @@ function plan() {
     if (!placed) break;
     carts++; totes += slots.length;
   }
-  return { carts, totes, left: used.filter((u) => !u).length, per, pieces };
+  return { carts, totes, left: used.filter((u) => !u).length };
 }
 function updateSel() {
   $("selcount").textContent = sel.size;
   const p = plan();
   $("cartinfo").textContent = sel.size
-    ? `= ${p.carts} CART${p.carts === 1 ? "" : "S"} · ${p.totes} TOTES${p.left ? ` · ${p.left} WON'T FIT` : ""} · ${data?.free_carts ?? 0} FREE`
+    ? `= ${p.carts} CART${p.carts === 1 ? "" : "S"}${p.groups > 1 ? ` (${p.groups} TYPES, KEPT SEPARATE)` : ""} · ${p.totes} TOTES${p.left ? ` · ${p.left} WON'T FIT` : ""} · ${data?.free_carts ?? 0} FREE`
     : `${data?.free_carts ?? 0} CARTS FREE`;
   $("buildbtn").disabled = !sel.size || !p.carts;
 }
@@ -191,9 +230,24 @@ $("per").addEventListener("input", updateSel);
 $("buildbtn").onclick = async () => {
   const p = plan();
   const how = shareMode ? `${p.per} totes per cart, up to ${p.pieces} pieces per tote (orders can share a tote)` : `${p.per} totes per cart, 1 order per tote`;
-  if (!confirm(`Build about ${p.carts} cart(s) from ${sel.size} orders?\n${how}.\nOrders are never split: an order only goes on a cart if it fits whole. Express first, then oldest.`)) return;
+  const groups = selByGroup();
+  const typeList = [...groups.keys()].map((k) => GN[k]?.label ?? k).join(", ");
+  if (!confirm(`Build about ${p.carts} cart(s) from ${sel.size} orders?\n${how}.\nOrder types: ${typeList}${groups.size > 1 ? " (each type goes on its own carts)" : ""}.\nOrders are never split: an order only goes on a cart if it fits whole. Express first, then oldest.`)) return;
   $("buildbtn").disabled = true; $("buildbtn").textContent = "Building…";
-  const { data: r, error } = await sb.rpc("wms_build_carts", { p_order_ids: [...sel], p_totes_per_cart: p.per, p_pieces_per_tote: p.pieces });
+  // one build per order type, so a cart only ever holds one type
+  const r = { ok: false, carts: [], failed: [], skipped: [], left_over: 0, left_over_orders: [] };
+  let error = null;
+  for (const [g, orders] of groups) {
+    const res = await sb.rpc("wms_build_carts", { p_order_ids: orders.map((o) => o.id), p_totes_per_cart: p.per, p_pieces_per_tote: p.pieces });
+    if (res.error) { error = res.error; break; }
+    const x = res.data;
+    for (const c of x.carts ?? []) c.group = g;
+    r.ok ||= !!x.ok; r.carts.push(...(x.carts ?? [])); r.failed.push(...(x.failed ?? [])); r.skipped.push(...(x.skipped ?? []));
+    r.left_over += x.left_over ?? 0; r.left_over_orders.push(...(x.left_over_orders ?? []));
+    if (!x.ok && x.error) r.error = x.error;
+    if (x.error === "NO_FREE_CARTS") break;
+  }
+  if (r.ok && r.error === "NO_READY_ORDERS") delete r.error;
   $("buildbtn").textContent = "Build carts";
   if (error) { await check(error); modal(`<h2>Could not build carts</h2><p class="bad">${esc(error.message)}</p>`); return loadOrders(); }
   sel.clear();
@@ -201,8 +255,8 @@ $("buildbtn").onclick = async () => {
   modal(`<h2>${r.ok ? `${r.carts.length} cart${r.carts.length === 1 ? "" : "s"} built` : "No carts built"}</h2>
     ${r.error ? `<p class="bad">${esc(ERR[r.error] ?? r.error)}</p>` : ""}
     <p class="mono">${esc(how.toUpperCase())}</p>
-    ${(r.carts ?? []).length ? `<table style="margin-top:8px"><tr><th>Cart</th><th class="num">Orders</th><th class="num">Totes</th><th class="num">Units</th><th class="num">Stops</th><th>Short of stock</th></tr>
-      ${r.carts.map((c) => `<tr><td><b>${esc(c.cart)}</b></td><td class="num">${c.orders}</td><td class="num">${c.totes}</td><td class="num">${c.units}</td><td class="num">${c.stops}</td>
+    ${(r.carts ?? []).length ? `<table style="margin-top:8px"><tr><th>Cart</th><th>Type</th><th class="num">Orders</th><th class="num">Totes</th><th class="num">Units</th><th class="num">Stops</th><th>Short of stock</th></tr>
+      ${r.carts.map((c) => `<tr><td><b>${esc(c.cart)}</b></td><td>${grpBadge(c.group)}</td><td class="num">${c.orders}</td><td class="num">${c.totes}</td><td class="num">${c.units}</td><td class="num">${c.stops}</td>
         <td>${(c.shortages ?? []).map((s) => `<span class="tag">${esc(s.sku)} ×${s.short}</span>`).join("") || "-"}</td></tr>`).join("")}</table>` : ""}
     ${(r.failed ?? []).length ? `<p class="bad" style="margin-top:8px">Not built: ${r.failed.map((f) => `${esc(f.cart)} (${esc(f.error)})`).join("; ")}</p>` : ""}
     ${(r.skipped ?? []).length ? `<p class="warn" style="margin-top:8px">Skipped ${r.skipped.length}: ${r.skipped.map((s) => `#${esc(s.order_number)} (${esc(s.reason.replace("_", " "))})`).join(", ")}</p>` : ""}
@@ -233,6 +287,7 @@ async function loadCarts() {
   $("cartsum").textContent = `${open.length} CARTS OPEN · ${fmt(open.reduce((a, c) => a + c.orders, 0))} ORDERS · ${fmt(open.reduce((a, c) => a + (c.units - c.picked), 0))} UNITS TO PICK · ${d.length - open.length} PICKED TODAY`;
   $("carts").innerHTML = d.length ? d.map((c) => { const [label, col] = c.paused && !c.picker ? ["Needs a picker", "var(--orange)"] : c.paused ? ["Paused", "var(--amber)"] : SC[c.status] ?? [c.status, "var(--muted)"]; const pct = c.units ? Math.round(100 * c.picked / c.units) : 0;
     return `<div class="card" data-s="${c.session_id}"><h3>${esc(c.cart)} <span class="chip" style="background:${col}">${label}</span></h3>
+      <div>${grpBadge(c.group)}</div>
       <div><b>${c.orders}</b> orders · <b>${c.units}</b> units · ${c.stops} stops</div>
       <div class="bar2"><i style="width:${pct}%"></i></div>
       <div class="split">${c.picked}/${c.units} picked · totes ${c.totes}/${c.orders}${c.picker ? ` · ${esc(c.picker)}` : ""}</div>
@@ -259,7 +314,7 @@ async function openCart(id) {
   const canRelease = boss && ["draft", "assigned", "in_progress"].includes(s.status) && s.picker;
   $("detail").hidden = false;
   $("detail").innerHTML = `<div class="panel">
-    <div class="kicker"><h2>${esc(s.cart ?? "Cart")} · ${label} · ${s.tote_slots ?? "-"} totes</h2><span class="mono">ROUTE ${esc((s.route ?? "").toUpperCase())}</span></div>
+    <div class="kicker"><h2>${esc(s.cart ?? "Cart")} · ${label} · ${s.tote_slots ?? "-"} totes</h2><div>${grpBadge(s.group)}</div><span class="mono">ROUTE ${esc((s.route ?? "").toUpperCase())}</span></div>
     <div class="toolbar noprint"><span class="mono">Built ${new Date(s.created_at).toLocaleString("en-AU")}${s.created_by ? ` by ${esc(s.created_by)}` : ""}${s.picker ? ` · Picker ${esc(s.picker)}` : ""}${s.paused ? ` · ${s.picker ? "PAUSED" : "NEEDS A PICKER"} (${esc((s.pause_reason ?? "").replace(/_/g, " "))})` : ""}</span>
       <span style="flex:1"></span><button class="ghost" id="printcart">Print pick list</button>${canRelease ? `<button class="ghost" id="releasecart">Unassign ${esc(s.picker)}</button>` : ""}${canCancel ? `<button class="ghost" id="cancelcart" style="color:var(--red);border-color:var(--red)">Take cart apart</button>` : ""}</div>
     <h3 style="margin:10px 0 6px">Orders on this cart</h3>

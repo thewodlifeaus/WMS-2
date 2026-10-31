@@ -71,6 +71,27 @@ Deno.serve(async (req) => {
       unknown_sample: skus.filter((k) => !(known ?? []).some((p) => p.sku === k)).slice(0, 10) });
   }
 
+  // stores mode (read only): how orders are tagged in ShipStation, by tag + AU/INTL + pickup + store.
+  // Used 1 Nov 2026 to work out SkuVault's "channel accounts" (they are ShipStation tags, see migration 023).
+  if (body.stores) {
+    const since = new Date(Date.now() - (body.days ?? 7) * 864e5).toISOString();
+    const combo: Record<string, number> = {};
+    for (const st of ["label_purchased", "pending"]) {
+      for (let n = 1, pages = 1; n <= Math.min(pages, 15); n++) {
+        const res = await page(st, since, n);
+        pages = res.pages;
+        for (const s of res.shipments as (SsShipment & { store_id?: string; tags?: { name: string }[] })[]) {
+          const c = s.ship_to?.country_code ?? "?";
+          const v = s.requested_shipment_service ?? "(none)";
+          const key = (s.tags ?? []).map((t) => t.name.trim()).filter((t) => !/SHIPPING|PO BOX|PREORDER|Missing/i.test(t)).sort().join("+")
+            + " | " + (c === "AU" ? "AU" : "INTL") + (/pickup/i.test(v) ? " | PICKUP" : "") + " | " + (s.store_id ?? "");
+          combo[key] = (combo[key] ?? 0) + 1;
+        }
+      }
+    }
+    return reply({ combo });
+  }
+
   const { data: state } = await db.from("sync_state").select("*").eq("system", "shipstation_orders").maybeSingle();
   // first run: last 14 days only (avoid importing years of history)
   const since = state?.cursor ?? new Date(Date.now() - 14 * 864e5).toISOString();

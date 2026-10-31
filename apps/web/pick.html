@@ -58,10 +58,12 @@ async function home(note, kind) {
   $("out").onclick = signOut;
   try {
     const carts = await rpc("wms_pick_carts_available");
+    const GRP = { REGS: ["Regular", "#2f5bd3"], PRIO_AU: ["Priority AU", "#c2185b"], PRIO_INT: ["International", "#6a1b9a"], ICON: ["The Iconic", "#111111"], OPENFR8: ["OpenFreight", "#00796b"], PKUP: ["Pickup", "#e65100"], OTHER: ["Other", "#757575"] };
+    const grpBadge = (g) => (g ?? "").split("+").filter(Boolean).map((k) => `<span class="chip" style="background:${(GRP[k] ?? [k, "#757575"])[1]};color:#fff">${esc((GRP[k] ?? [k])[0])}</span>`).join(" ");
     const STATE = { not_started: ["Ready", "var(--green)"], paused: ["Paused", "var(--amber)"], released: ["Needs a picker", "var(--orange)"], picking: ["Being picked", "var(--blue)"] };
     $("carts").innerHTML = carts.length ? carts.map((c) => { const [l, col] = STATE[c.state] ?? [c.state, "var(--muted)"];
       return `<div class="cart" data-cart="${esc(c.cart_barcode)}"><b class="code">${esc(c.cart)}</b>
-        <div><b>${c.orders}</b> orders · <b>${c.units - c.picked}</b> units to pick${c.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}
+        <div>${grpBadge(c.group)} <b>${c.orders}</b> orders · <b>${c.units - c.picked}</b> units to pick${c.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}
           <div class="split mono">${c.mine ? "YOUR CART · " : c.picker ? esc(c.picker).toUpperCase() + " · " : ""}${c.pause_reason ? esc(reasonLabel[c.pause_reason] ?? c.pause_reason).toUpperCase() + " · " : ""}START ${esc(c.first_bin ?? "-")}</div></div>
         <span class="chip" style="background:${col}">${l}</span></div>`; }).join("")
       : `<div class="card">No carts waiting. Ask a supervisor to build carts in Orders and carts.</div>`;

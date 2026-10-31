@@ -30,3 +30,5 @@ td{padding:10px 8px;border-bottom:1px solid var(--rule);vertical-align:top}
 .num{text-align:right;font-variant-numeric:tabular-nums}
 .foot{margin-top:32px;font-weight:900;text-transform:uppercase;line-height:1;color:var(--ink);font-size:13px}
 @media (max-width:640px){.hide-sm{display:none}}
+[hidden]{display:none!important}
+.bar button.ghost{color:#fff;border-color:#fff}

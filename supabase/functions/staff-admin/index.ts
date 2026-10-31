@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
 
   const username = String(body.username ?? "").trim().toLowerCase();
   const findStaff = async () =>
-    (await db.from("staff").select("id, username, display_name, role, is_active").ilike("username", username).maybeSingle()).data;
+    (await db.from("staff").select("id, username, display_name, role, is_active").eq("username", username).maybeSingle()).data;
 
   try {
     switch (action) {
@@ -81,6 +81,8 @@ Deno.serve(async (req) => {
         const s = await findStaff();
         if (!s) return json({ ok: false, error: "NOT_FOUND" }, 404);
         if (!isSup && caller?.id !== s.id) return json({ ok: false, error: "FORBIDDEN" }, 403);
+        // supervisors can reset floor staff PINs, but never an admin's (except their own)
+        if (!isAdmin && s.role === "admin" && caller?.id !== s.id) return json({ ok: false, error: "FORBIDDEN" }, 403);
         const pin = body.pin ? String(body.pin) : randomPin();
         if (!/^\d{6}$/.test(pin)) return json({ ok: false, error: "PIN_MUST_BE_6_DIGITS" }, 400);
         const { error } = await db.auth.admin.updateUserById(s.id, { password: pin });
@@ -93,6 +95,7 @@ Deno.serve(async (req) => {
         if (!ROLES.includes(body.role)) return json({ ok: false, error: "BAD_ROLE" }, 400);
         const s = await findStaff();
         if (!s) return json({ ok: false, error: "NOT_FOUND" }, 404);
+        if (s.id === caller?.id) return json({ ok: false, error: "CANNOT_CHANGE_YOUR_OWN_ROLE" }, 400);
         await db.from("staff").update({ role: body.role }).eq("id", s.id);
         await db.auth.admin.updateUserById(s.id, { app_metadata: { wms_role: body.role } });
         return json({ ok: true, username: s.username, role: body.role });

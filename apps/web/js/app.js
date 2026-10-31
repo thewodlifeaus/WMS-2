@@ -20,16 +20,30 @@ export async function me() {
   return data;
 }
 
-// Send people without a session back to the login page.
-export async function requireLogin() {
+// Wipe the saved login from this browser, even if the server has already ended it.
+export async function clearLogin() {
+  try { await sb.auth.signOut({ scope: "local" }); } catch {}
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith("sb-")) localStorage.removeItem(k); } catch {}
+}
+
+// Check the saved login is still valid on the server (it ends when a PIN changes).
+export async function validSession() {
   const { data } = await sb.auth.getSession();
-  if (!data.session) { location.href = `/index.html?next=${encodeURIComponent(location.pathname)}`; return null; }
+  if (!data.session) return false;
+  const { data: u, error } = await sb.auth.getUser();
+  if (error || !u?.user) { await clearLogin(); return false; }
+  return true;
+}
+
+// Send people without a valid login back to the login page.
+export async function requireLogin() {
+  if (!(await validSession())) { location.href = `/index.html?next=${encodeURIComponent(location.pathname)}`; return null; }
   const m = await me();
-  if (!m) { await sb.auth.signOut(); location.href = "/index.html"; return null; }
+  if (!m) { await clearLogin(); location.href = "/index.html"; return null; }
   return m;
 }
 
-export async function signOut() { await sb.auth.signOut(); location.href = "/index.html"; }
+export async function signOut() { await clearLogin(); location.href = "/index.html"; }
 
 export const fmt = (n) => (n ?? 0).toLocaleString("en-AU");
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

@@ -5,7 +5,7 @@
 <title>Inventory search · TWL WMS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/brand.css">
+<link rel="stylesheet" href="/css/brand.css?v=3">
 <style>
   .searchrow{display:grid;grid-template-columns:1fr auto;gap:8px}
   #q{font-size:20px;min-height:56px}
@@ -39,7 +39,7 @@
   <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
 </main>
 <script type="module">
-import { sb, requireLogin, signOut, esc, fmt } from "/js/app.js";
+import { sb, requireLogin, signOut, esc, fmt } from "/js/app.js?v=3";
 await requireLogin();
 const q = document.getElementById("q"), out = document.getElementById("results");
 const TYPE = { pick: "PICK", backfill: "BACKSTOCK", reserved: "RESERVED", receiving: "RECEIVING", staging: "STAGING", quarantine: "QUARANTINE" };

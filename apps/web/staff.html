@@ -5,7 +5,7 @@
 <title>Staff and PINs · TWL WMS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/brand.css">
+<link rel="stylesheet" href="/css/brand.css?v=3">
 <style>
   .add{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr auto;gap:8px;align-items:end}
   .add label{display:grid;gap:4px}
@@ -58,7 +58,7 @@
   <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
 </main>
 <script type="module">
-import { sb, requireLogin, signOut, esc } from "/js/app.js";
+import { sb, requireLogin, signOut, esc, clearLogin } from "/js/app.js?v=3";
 const ROLES = [["picker","Picker"],["packer","Packer"],["receiver","Receiver"],["supervisor","Supervisor"],["admin","Admin"],["display","TV screen"]];
 const label = (r) => (ROLES.find(x => x[0] === r) ?? [r, r])[1];
 const m = await requireLogin();
@@ -73,6 +73,7 @@ async function call(body) {
   if (error) {
     let msg = error.message;
     try { const j = await error.context.json(); msg = j.error ?? msg; } catch {}
+    if (msg === "NOT_SIGNED_IN") { await clearLogin(); location.href = "/index.html?next=/staff.html"; }
     throw new Error(msg);
   }
   if (!data?.ok) throw new Error(data?.error ?? "Something went wrong");

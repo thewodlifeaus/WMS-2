@@ -5,7 +5,7 @@
 <title>TWL WMS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/brand.css">
+<link rel="stylesheet" href="/css/brand.css?v=3">
 <style>
   .login{max-width:420px;margin:8vh auto;padding:0 16px}
   .login .panel{display:grid;gap:14px}
@@ -46,7 +46,7 @@
   <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
 </main>
 <script type="module">
-import { sb, signIn, me, signOut, esc } from "/js/app.js";
+import { sb, signIn, me, signOut, esc, validSession, clearLogin } from "/js/app.js?v=3";
 const next = new URLSearchParams(location.search).get("next");
 let me_ = null;
 const show = (id) => { for (const s of ["signin","home"]) document.getElementById(s).hidden = s !== id; };
@@ -59,8 +59,8 @@ async function home(m) {
   me_ = m;
   show("home");
 }
-const { data } = await sb.auth.getSession();
-const current = data.session ? await me() : null;
+if (new URLSearchParams(location.search).has("logout")) await clearLogin();
+const current = (await validSession()) ? await me() : null;
 current ? home(current) : show("signin");
 async function go() {
   const e = document.getElementById("err"); e.textContent = "";
@@ -82,11 +82,12 @@ document.getElementById("savepin").onclick = async () => {
   if (error || !data?.ok) {
     let why = "";
     try { why = (await error.context.json()).error ?? ""; } catch {}
-    msg.textContent = why === "NOT_SIGNED_IN" ? "You have been signed out. Sign in again, then try once more." : "Could not save. Try again.";
+    if (why === "NOT_SIGNED_IN") { await clearLogin(); location.href = "/index.html"; return; }
+    msg.textContent = "Could not save. Try again.";
     btn.disabled = false; btn.textContent = "Save new PIN"; return;
   }
   // Changing a PIN signs you out everywhere, so sign in again with the new one.
-  await sb.auth.signOut({ scope: "local" });
+  await clearLogin();
   location.href = "/index.html?pin=changed";
 };
 if (new URLSearchParams(location.search).get("pin") === "changed") {

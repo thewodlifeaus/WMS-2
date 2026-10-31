@@ -58,7 +58,7 @@
   <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
 </main>
 <script type="module">
-import { sb, requireLogin, signOut, esc, clearLogin } from "/js/app.js?v=3";
+import { sb, requireLogin, signOut, esc, clearLogin } from "/js/app.js?v=4";
 const ROLES = [["picker","Picker"],["packer","Packer"],["receiver","Receiver"],["supervisor","Supervisor"],["admin","Admin"],["display","TV screen"]];
 const label = (r) => (ROLES.find(x => x[0] === r) ?? [r, r])[1];
 const m = await requireLogin();

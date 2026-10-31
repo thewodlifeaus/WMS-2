@@ -26,15 +26,16 @@
   </section>
   <section id="home" hidden>
     <div class="panel"><div class="kicker"><h2 id="hello">Hi</h2><span class="mono" id="role"></span></div>
+      <div class="err" id="denied" hidden style="margin-bottom:8px">That screen isn't available for your login. Ask an admin if you need it.</div>
       <nav class="menu">
-        <a href="/pick.html">Picking (tablet) <span class="chip">PICK</span></a>
-        <a href="/stock.html">Stock tools (tablet) <span class="chip">MOVE</span></a>
-        <a href="/orders.html">Orders and carts <span class="chip">CARTS</span></a>
-        <a href="/pack.html">Pack desk <span class="chip">PACK</span></a>
-        <a href="/search.html">Inventory search <span class="chip">FIND</span></a>
-        <a href="/tv.html">Warehouse TV dashboard <span class="chip">SCREEN</span></a>
-        <a href="/history.html" id="histlink" hidden>Stock history (who changed what) <span class="chip">LOG</span></a>
-        <a href="/staff.html" id="stafflink" hidden>Staff and PINs <span class="chip">TEAM</span></a>
+        <a href="/pick.html" data-page="pick" hidden>Picking (tablet) <span class="chip">PICK</span></a>
+        <a href="/stock.html" data-page="stock" hidden>Stock tools (tablet) <span class="chip">MOVE</span></a>
+        <a href="/orders.html" data-page="orders" hidden>Orders and carts <span class="chip">CARTS</span></a>
+        <a href="/pack.html" data-page="pack" hidden>Pack desk <span class="chip">PACK</span></a>
+        <a href="/search.html" data-page="search" hidden>Inventory search <span class="chip">FIND</span></a>
+        <a href="/tv.html" data-page="tv" hidden>Warehouse TV dashboard <span class="chip">SCREEN</span></a>
+        <a href="/history.html" data-page="history" hidden>Stock history (who changed what) <span class="chip">LOG</span></a>
+        <a href="/staff.html" data-page="staff" hidden>Staff and PINs <span class="chip">TEAM</span></a>
       </nav>
       <details class="mypin" style="margin-top:14px"><summary class="mono" style="cursor:pointer;min-height:44px;display:flex;align-items:center">Change my PIN</summary>
         <div style="display:grid;gap:8px;margin-top:8px">
@@ -44,24 +45,25 @@
           <div id="pinmsg" class="err"></div>
         </div>
       </details>
-      <p class="mono" style="margin-top:14px">Picking, receiving and packing screens are coming next.</p>
       <button class="ghost" id="out" style="margin-top:14px;width:100%">Sign out</button>
     </div>
   </section>
   <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
 </main>
 <script type="module">
-import { sb, signIn, me, signOut, esc, validSession, clearLogin } from "/js/app.js?v=3";
+import { sb, signIn, me, signOut, esc, validSession, clearLogin, canOpen } from "/js/app.js?v=4";
 const next = new URLSearchParams(location.search).get("next");
 let me_ = null;
 const show = (id) => { for (const s of ["signin","home"]) document.getElementById(s).hidden = s !== id; };
 async function home(m) {
-  if (next) { location.href = next; return; }
+  if (next && canOpen(m.role, next.replace(/^\//, "").replace(/\.html$/, ""))) { location.href = next; return; }
   if (m.role === "display") { location.href = "/tv.html"; return; }
   document.getElementById("hello").textContent = `Hi ${m.name}`;
   document.getElementById("role").textContent = m.role.toUpperCase();
-  document.getElementById("stafflink").hidden = !["admin","supervisor"].includes(m.role);
-  document.getElementById("histlink").hidden = !["admin","supervisor"].includes(m.role);
+  // only show the screens this role can use
+  for (const a of document.querySelectorAll("[data-page]")) a.hidden = !canOpen(m.role, a.dataset.page);
+  const denied = new URLSearchParams(location.search).get("denied");
+  document.getElementById("denied").hidden = !denied;
   me_ = m;
   show("home");
 }

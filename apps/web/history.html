@@ -50,7 +50,7 @@
   <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
 </main>
 <script type="module">
-import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=3";
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=4";
 const m = await requireLogin();
 if (m && !["admin", "supervisor"].includes(m.role)) location.href = "/index.html";
 const $ = (id) => document.getElementById(id);

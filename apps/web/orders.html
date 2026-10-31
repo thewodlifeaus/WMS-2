@@ -98,7 +98,7 @@
 <div class="modal" id="modal" hidden><div class="panel"><div id="mbody"></div><div style="margin-top:12px;text-align:right"><button id="mclose">Close</button></div></div></div>
 
 <script type="module">
-import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=3";
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=4";
 const me = await requireLogin();
 if (me?.role === "display") location.href = "/tv.html";
 const boss = ["admin", "supervisor"].includes(me?.role);

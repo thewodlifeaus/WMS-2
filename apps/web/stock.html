@@ -35,7 +35,7 @@
 <div class="modal" id="modal" hidden><div class="panel" id="mpanel"></div></div>
 
 <script type="module">
-import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=3";
+import { sb, requireLogin, signOut, esc, fmt, clearLogin, canOpen } from "/js/app.js?v=4";
 const me = await requireLogin();
 if (me?.role === "display") location.href = "/tv.html";
 const $ = (id) => document.getElementById(id);
@@ -74,7 +74,7 @@ async function menu(note, kind) {
       <button class="ghost" id="mFind">Where is this item? <small>scan a product</small></button></div>
     <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Or just scan a location or a product to look it up.")}</div>
     <div class="step">Your moves and changes today</div><div class="recent" id="recent">Loading…</div>
-    <div class="btns"><a class="ghost tbtn" href="/pick.html">Back to picking</a><button class="ghost" id="out">Sign out</button></div>`;
+    <div class="btns">${canOpen(me?.role, "pick") ? `<a class="ghost tbtn" href="/pick.html">Back to picking</a>` : `<a class="ghost tbtn" href="/index.html">Menu</a>`}<button class="ghost" id="out">Sign out</button></div>`;
   $("mMove").onclick = () => move(); $("mAdj").onclick = () => adjust(); $("mMerge").onclick = () => merge(); $("mLook").onclick = () => lookScreen(); $("mFind").onclick = () => findScreen();
   $("out").onclick = signOut;
   try { const r = await rpc("wms_my_recent_moves", { p_limit: 8 });

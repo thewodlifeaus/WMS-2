@@ -132,7 +132,7 @@
 <div class="modal" id="modal" hidden><div class="panel"><h2 id="mtitle"></h2><p id="mbody" style="margin-bottom:14px"></p><div class="row2"><button class="ghost" id="mno">Cancel</button><button class="signal" id="myes">OK</button></div></div></div>
 
 <script type="module">
-import { sb, requireLogin, signOut, esc, clearLogin } from "/js/app.js?v=3";
+import { sb, requireLogin, signOut, esc, clearLogin } from "/js/app.js?v=4";
 const me = await requireLogin();
 if (me?.role === "display") location.href = "/tv.html";
 const boss = ["admin", "supervisor"].includes(me?.role);

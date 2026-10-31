@@ -33,7 +33,37 @@ async function setState(system: string, patch: Record<string, unknown>) {
 // ---------------------------------------------------------------------------
 // 1. Shopify
 // ---------------------------------------------------------------------------
+// Token from the one-time "Connect to Shopify" (shopify-oauth function), refreshed
+// when it is about to expire. Falls back to client credentials (same-org apps only).
+async function secret(name: string) {
+  const { data } = await db.from("app_secrets").select("value").eq("name", name).maybeSingle();
+  return data?.value ?? "";
+}
+
 async function shopifyToken() {
+  const stored = await secret("shopify_access_token");
+  if (stored) {
+    const expires = await secret("shopify_token_expires_at");
+    if (!expires || new Date(expires).getTime() > Date.now()) return stored;
+    const refresh = await secret("shopify_refresh_token");
+    if (refresh) {
+      const r = await fetch(`https://${env("SHOPIFY_STORE")}.myshopify.com/admin/oauth/access_token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ client_id: env("SHOPIFY_CLIENT_ID"), client_secret: env("SHOPIFY_CLIENT_SECRET"),
+                               grant_type: "refresh_token", refresh_token: refresh }),
+      });
+      const t = await r.json().catch(() => ({}));
+      if (!r.ok || !t.access_token) throw new Error(`Shopify token refresh ${r.status}: ${JSON.stringify(t).slice(0, 200)}`);
+      await db.from("app_secrets").upsert([
+        { name: "shopify_access_token", value: t.access_token },
+        { name: "shopify_refresh_token", value: t.refresh_token ?? refresh },
+        { name: "shopify_token_expires_at",
+          value: t.expires_in ? new Date(Date.now() + (t.expires_in - 120) * 1000).toISOString() : "" },
+      ]);
+      return t.access_token as string;
+    }
+  }
   const res = await fetch(`https://${env("SHOPIFY_STORE")}.myshopify.com/admin/oauth/access_token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -43,7 +73,13 @@ async function shopifyToken() {
       client_secret: env("SHOPIFY_CLIENT_SECRET"),
     }),
   });
-  if (!res.ok) throw new Error(`Shopify token ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const body = await res.text();
+    if (body.includes("shop_not_permitted")) {
+      throw new Error("NOT_CONNECTED: open https://nklbnykqftzkbqbuammg.supabase.co/functions/v1/shopify-oauth once to connect Shopify");
+    }
+    throw new Error(`Shopify token ${res.status}: ${body.slice(0, 200)}`);
+  }
   return (await res.json()).access_token as string;
 }
 

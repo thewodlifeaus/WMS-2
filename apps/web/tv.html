@@ -15,7 +15,7 @@
   .row{display:grid;gap:1.1vw}
   .r1{grid-template-columns:1fr 1fr 1.25fr}
   .r2{grid-template-columns:repeat(5,1fr)}
-  .r3{grid-template-columns:1fr 1fr 1.6fr;min-height:0}
+  .r3{grid-template-columns:.85fr .85fr 1.3fr 1.5fr;min-height:0}
   .panel{padding:1.2vh 1vw;min-height:0}
   .kicker{margin-bottom:.8vh}.kicker h2{font-size:.85em}
   .dial{display:flex;flex-direction:column;align-items:center}
@@ -34,6 +34,8 @@
   .lead b{font:900 1.9em/1 Archivo}.lead span{font:900 1.9em/1 Archivo;color:var(--orange)}
   ol{list-style:none}ol li{display:flex;justify-content:space-between;padding:.55vh .3vw;border-bottom:1px solid var(--rule)}
   .chart svg{width:100%;height:100%}
+  .rate{display:flex;align-items:baseline;gap:.6vw}.rate b{font:900 3em/1 Archivo;color:var(--ink)}
+  .rcmp{display:flex;justify-content:space-between;gap:.4vw;font-size:.8em;margin-top:.4vh}
   .stale{background:var(--orange);color:#111;padding:.4vh .8vw;font-weight:800}
 </style>
 </head>
@@ -52,7 +54,12 @@
   <section class="row r3">
     <div class="panel"><div class="kicker"><h2>Top picker</h2><span class="mono">ITEMS PICKED</span></div><div id="pickers"></div></div>
     <div class="panel"><div class="kicker"><h2>Top packer</h2><span class="mono">ITEMS PACKED</span></div><div id="packers"></div></div>
-    <div class="panel chart" style="display:flex;flex-direction:column"><div class="kicker"><h2>Items picked by hour</h2><span class="mono"><span style="color:var(--ink)">■</span> TODAY &nbsp;<span style="color:var(--rule)">■</span> LAST WORKING DAY</span></div><div style="flex:1;min-height:0"><svg id="chart" preserveAspectRatio="none"></svg></div></div>
+    <div class="panel chart" style="display:flex;flex-direction:column"><div class="kicker"><h2>Items picked by hour</h2><span class="mono"><span style="color:var(--ink)">■</span> TODAY &nbsp;<span style="color:var(--rule)">■</span> <span class="lwdShort">LAST WORKING DAY</span></span></div><div style="flex:1;min-height:0"><svg id="chart" preserveAspectRatio="none"></svg></div></div>
+    <div class="panel chart" style="display:flex;flex-direction:column"><div class="kicker"><h2>Items packed per hour</h2><span class="mono"><span style="color:var(--orange)">■</span> TODAY &nbsp;<span style="color:var(--rule)">■</span> <span class="lwdShort">LAST WORKING DAY</span></span></div>
+      <div class="rate"><b id="prToday">-</b><span class="mono">PER HOUR TODAY</span><span id="prDelta" style="margin-left:auto;font-size:1.3em"></span></div>
+      <div class="rcmp"><span class="mono" id="prSame">-</span><span class="mono" id="prFull">-</span></div>
+      <div class="rcmp"><span class="mono" id="prHour">-</span><span id="prHourDelta"></span></div>
+      <div style="flex:1;min-height:0;margin-top:.6vh"><svg id="chartPacked" preserveAspectRatio="none"></svg></div></div>
   </section>
 </main>
 <script type="module">
@@ -95,15 +102,15 @@ function leaders(list) {
   const [top, ...rest] = list;
   return `<div class="lead"><b>${esc(top.name)}</b><span>${fmt(top.units)}</span></div><ol>${rest.map((r, i) => `<li><span>${i + 2}. ${esc(r.name)}</span><b>${fmt(r.units)}</b></li>`).join("")}</ol>`;
 }
-function chart(rows) {
-  const svg = $("chart"), W = 600, H = 200, max = Math.max(1, ...rows.flatMap(r => [r.today, r.last_working_day]));
+function chart(rows, id = "chart", col = "var(--ink)") {
+  const svg = $(id), W = 600, H = 200, max = Math.max(1, ...rows.flatMap(r => [r.today, r.last_working_day]));
   const bw = W / rows.length;
   svg.setAttribute("viewBox", `0 0 ${W} ${H + 22}`);
   svg.innerHTML = rows.map((r, i) => {
     const h1 = r.last_working_day / max * H, h2 = r.today / max * H, x = i * bw;
     const label = r.hour > 12 ? r.hour - 12 + "P" : r.hour + (r.hour === 12 ? "P" : "A");
     return `<rect x="${x + bw * .12}" y="${H - h1}" width="${bw * .36}" height="${h1}" fill="var(--rule)"/>
-            <rect x="${x + bw * .5}" y="${H - h2}" width="${bw * .36}" height="${h2}" fill="var(--ink)"/>
+            <rect x="${x + bw * .5}" y="${H - h2}" width="${bw * .36}" height="${h2}" fill="${col}"/>
             <text x="${x + bw / 2}" y="${H + 16}" text-anchor="middle" font-size="12" font-family="IBM Plex Mono" fill="var(--muted)">${label}</text>`;
   }).join("") + `<line x1="0" y1="${H}" x2="${W}" y2="${H}" stroke="var(--ink)"/>`;
 }
@@ -121,11 +128,25 @@ async function load() {
   $("kpis").innerHTML = KPIS.map(([k, label]) => {
     const now = m.now[k], p = m.last_working_day_same_time[k], w = m.last_week_same_time[k];
     return `<div class="panel kpi"><div class="kicker"><h2>${label}</h2><span class="mono">TODAY</span></div><div class="now">${fmt(now)}</div>
-      <div class="cmp"><span class="mono">VS ${dayName(m.last_working_day).split(" ")[0]} ${fmt(p)}</span>${delta(now, p)}</div>
+      <div class="cmp"><span class="mono">VS ${dayName(m.last_working_day).split(" ")[0].replace(",", "")} ${fmt(p)}</span>${delta(now, p)}</div>
       <div class="cmp"><span class="mono">VS LAST WK ${fmt(w)}</span>${delta(now, w)}</div></div>`;
   }).join("");
   $("pickers").innerHTML = leaders(m.top_pickers); $("packers").innerHTML = leaders(m.top_packers);
   chart(m.hourly);
+  // items packed per hour vs last working day
+  const pr = m.pack_rate, lwd = dayName(m.last_working_day).split(" ")[0].replace(",", "");
+  document.querySelectorAll(".lwdShort").forEach((e) => { e.textContent = lwd; });
+  if (pr) {
+    const t = pr.today.per_hour, ps = pr.last_working_day_same_time.per_hour, pf = pr.last_working_day_full.per_hour;
+    $("prToday").textContent = t == null ? "-" : fmt(t);
+    $("prDelta").innerHTML = t == null || ps == null ? "" : delta(t, ps);
+    $("prSame").textContent = `${lwd} BY NOW ${ps == null ? "-" : fmt(ps) + "/H"}`;
+    $("prFull").textContent = `${lwd} FULL DAY ${pf == null ? "-" : fmt(pf) + "/H"}`;
+    const h = pr.this_hour, hl = (x) => x > 12 ? x - 12 + "PM" : x + (x === 12 ? "PM" : "AM");
+    $("prHour").textContent = `${hl(h.hour)} SO FAR ${fmt(h.today)} · ${lwd} ${hl(h.hour)}-${hl(h.hour + 1)} ${fmt(h.last_working_day)}`;
+    $("prHourDelta").innerHTML = "";
+    chart(m.hourly_packed ?? [], "chartPacked", "var(--orange)");
+  }
 }
 await load();
 setInterval(load, 60_000);

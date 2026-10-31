@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/brand.css?v=3">
-<link rel="stylesheet" href="/css/tablet.css?v=1">
+<link rel="stylesheet" href="/css/tablet.css?v=2">
 <style>
   .menu{display:grid;gap:10px}
   .menu button{min-height:84px;font-size:22px;text-align:left;padding:0 20px;display:flex;justify-content:space-between;align-items:center}
@@ -19,6 +19,12 @@
   .steps{display:flex;gap:6px;flex-wrap:wrap}
   .steps span{font:700 13px "IBM Plex Mono",monospace;padding:6px 10px;background:var(--panel);border:1px solid var(--rule);color:var(--muted)}
   .steps span.on{background:var(--ink);color:#fff;border-color:var(--ink)} .steps span.done{background:var(--green);color:#fff;border-color:var(--green)}
+  .row.tap{cursor:pointer} .row .edit{font:800 13px Archivo,sans-serif;color:var(--blue);text-transform:uppercase;display:block;margin-top:4px}
+  .seg3{display:grid;grid-template-columns:repeat(3,1fr);border:2px solid var(--ink)}
+  .seg3 button{min-height:56px;font-size:18px;background:var(--surface);color:var(--ink);border:0;border-right:1px solid var(--rule)}
+  .seg3 button.on{background:var(--ink);color:#fff}
+  .nowafter{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .nowafter div{text-align:center} .nowafter b{display:block;font:900 44px/1 "IBM Plex Mono",monospace;color:var(--ink)}
   .recent{font:500 14px "IBM Plex Mono",monospace;color:var(--muted);display:grid;gap:4px}
 </style>
 </head>
@@ -62,16 +68,20 @@ async function menu(note, kind) {
   $("hdr").textContent = "STOCK TOOLS"; onScan = (v) => lookup(v);
   app.innerHTML = `<div class="menu">
       <button class="signal" id="mMove">Move stock <small>location → location</small></button>
+      <button id="mAdj">Add / remove stock <small>in one location</small></button>
       <button id="mMerge">Merge locations <small>empty one into another</small></button>
       <button class="ghost" id="mLook">What's in a location? <small>scan a location</small></button>
       <button class="ghost" id="mFind">Where is this item? <small>scan a product</small></button></div>
     <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Or just scan a location or a product to look it up.")}</div>
-    <div class="step">Your moves today</div><div class="recent" id="recent">Loading…</div>
+    <div class="step">Your moves and changes today</div><div class="recent" id="recent">Loading…</div>
     <div class="btns"><a class="ghost tbtn" href="/pick.html">Back to picking</a><button class="ghost" id="out">Sign out</button></div>`;
-  $("mMove").onclick = () => move(); $("mMerge").onclick = () => merge(); $("mLook").onclick = () => lookScreen(); $("mFind").onclick = () => findScreen();
+  $("mMove").onclick = () => move(); $("mAdj").onclick = () => adjust(); $("mMerge").onclick = () => merge(); $("mLook").onclick = () => lookScreen(); $("mFind").onclick = () => findScreen();
   $("out").onclick = signOut;
   try { const r = await rpc("wms_my_recent_moves", { p_limit: 8 });
-    $("recent").innerHTML = r.length ? r.map((m) => `<div>${new Date(m.at).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })} · ${esc(m.sku)} ×${m.qty} · ${esc(m.from ?? "?")} → ${esc(m.to ?? "?")}${m.kind === "merge" ? " (merge)" : ""}</div>`).join("") : "<div>None yet.</div>";
+    const tm = (t) => new Date(t).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
+    $("recent").innerHTML = r.length ? r.map((m) => m.kind === "adjust"
+      ? `<div>${tm(m.at)} · ${esc(m.sku)} ${m.qty > 0 ? "+" : "−"}${Math.abs(m.qty)} · ${esc(m.bin)} (now ${m.after}) · ${esc((m.reason ?? "").replace(/^(Stock tool|Pick count fix): /, ""))}</div>`
+      : `<div>${tm(m.at)} · ${esc(m.sku)} ×${m.qty} · ${esc(m.from ?? "?")} → ${esc(m.to ?? "?")}${m.kind === "merge" ? " (merge)" : ""}</div>`).join("") : "<div>None yet.</div>";
   } catch { $("recent").textContent = ""; }
 }
 async function lookup(v) {   // scanned from the menu: location first, then product
@@ -86,18 +96,25 @@ function lookScreen() { $("hdr").textContent = "WHAT'S IN A LOCATION";
   wireType(); $("back").onclick = () => menu();
   onScan = async (v) => { try { const b = await rpc("wms_bin_contents", { p_bin: v }); if (!b.ok) { bad(); return msg(`${v}: location not recognised.`, "bad"); } good(); showBin(b); } catch (e) { bad(); msg(e.message, "bad"); } };
 }
-function showBin(b) {
+function showBin(b, note, kind) {
   $("hdr").textContent = b.bin.code;
   app.innerHTML = `<div class="loc"><div class="step">${esc(b.bin.type.toUpperCase())}${b.bin.active ? "" : " · SWITCHED OFF"} · ${b.items.length} SKU${b.items.length === 1 ? "" : "S"} · ${fmt(b.units)} UNITS</div><div class="big">${esc(b.bin.code)}</div></div>
-    <div class="list">${b.items.length ? b.items.map((i) => `<div class="row">${img(i.image_url)}
+    <div class="list">${b.items.length ? b.items.map((i, ix) => `<div class="row tap" data-ix="${ix}">${img(i.image_url)}
         <div><b>${esc(i.name)}</b> ${i.variant ? `<span class="mono">${esc(i.variant)}</span>` : ""}<div class="sku">${esc(i.sku)}</div>
         ${i.other_bins.length ? `<div class="split">Also in: ${i.other_bins.slice(0, 4).map((o) => `${esc(o.bin)} (${o.qty})`).join(", ")}${i.other_bins.length > 4 ? "…" : ""}</div>` : ""}</div>
-        <div class="q">${i.on_hand}${i.allocated ? `<small>${i.allocated} reserved</small>` : ""}</div></div>`).join("") : `<div class="card">Empty.</div>`}</div>
-    <div id="msg" class="msg">Scan another location or product, or:</div>
-    <div class="btns"><button class="signal" id="mv">Move from here</button><button id="mg">Merge this location</button></div>
+        <div class="q">${i.on_hand}${i.allocated ? `<small>${i.allocated} reserved</small>` : ""}<span class="edit">Edit</span></div></div>`).join("") : `<div class="card">Empty.</div>`}</div>
+    <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Tap an item to change its count. Scan another location or product, or:")}</div>
+    <button class="signal" id="addhere" style="min-height:64px;font-size:18px">Add an item to ${esc(b.bin.code)}</button>
+    <div class="btns"><button id="mv">Move from here</button><button id="mg">Merge this location</button></div>
     <button class="ghost" id="back">Back</button>`;
+  app.querySelectorAll("[data-ix]").forEach((r) => r.onclick = () => adjBox(b.bin.code, b.items[Number(r.dataset.ix)], "set", (res) => reopenBin(b.bin.code, res)));
+  $("addhere").onclick = () => adjust(b.bin.code);
   $("mv").onclick = () => move(b.bin.code); $("mg").onclick = () => merge(b.bin.code); $("back").onclick = () => menu();
   onScan = (v) => lookup(v);
+}
+async function reopenBin(code, res) {
+  const b = await rpc("wms_bin_contents", { p_bin: code });
+  showBin(b, `✓ ${res.sku} in ${res.bin}: ${res.before} → ${res.after}.`, "good");
 }
 function findScreen() { $("hdr").textContent = "WHERE IS THIS ITEM";
   app.innerHTML = `<div class="huge" style="font-size:40px">Scan a product</div>${typeBox("or type a SKU")}<div id="msg" class="msg"></div><button class="ghost" id="back">Back</button>`;
@@ -117,6 +134,91 @@ async function showItem(v) {
       <div id="msg" class="msg">Scan another product or location.</div><button class="ghost" id="back">Back</button>`;
     $("back").onclick = () => menu(); onScan = (x) => lookup(x);
   } catch (e) { bad(); msg(e.message, "bad"); }
+}
+
+// ===================== ADD / REMOVE: location -> product -> how many =====================
+function adjust(binCode) {
+  let bin = null;
+  const draw = (text, kind) => {
+    $("hdr").textContent = "ADD / REMOVE STOCK";
+    app.innerHTML = `<div class="steps"><span class="${bin ? "done" : "on"}">1. Location</span><span class="${bin ? "on" : ""}">2. Product</span><span>3. How many</span></div>
+      ${bin ? `<div class="loc ok"><div class="step">Location · ${bin.items.length} SKU${bin.items.length === 1 ? "" : "S"} · ${fmt(bin.units)} units</div><div class="big" style="font-size:44px">${esc(bin.bin.code)}</div></div>
+        ${bin.items.length ? `<div class="step">In here now (tap one, or scan any product)</div><div class="list">${bin.items.map((i, ix) => `<div class="row tap" data-ix="${ix}">${img(i.image_url)}<div><b>${esc(i.name)}</b> ${i.variant ? `<span class="mono">${esc(i.variant)}</span>` : ""}<div class="sku">${esc(i.sku)}</div></div><div class="q">${i.on_hand}<span class="edit">Change</span></div></div>`).join("")}</div>` : ""}` : ""}
+      <div class="card"><div class="huge" style="font-size:36px">${bin ? "Scan the product" : "Scan the location"}</div>${typeBox(bin ? "or type the SKU" : "or type the location, eg LG-04-02")}</div>
+      <div id="msg" class="msg ${kind ?? ""}">${esc(text ?? "")}</div>
+      <div class="btns"><button class="ghost" id="cancel">Done</button>${bin ? `<button class="ghost" id="other">Other location</button>` : "<span></span>"}</div>`;
+    wireType();
+    $("cancel").onclick = () => menu();
+    $("other")?.addEventListener("click", () => { bin = null; draw(); });
+    app.querySelectorAll("[data-ix]").forEach((r) => r.onclick = () => adjBox(bin.bin.code, bin.items[Number(r.dataset.ix)], "add", after));
+  };
+  const loadBin = async (v) => {
+    const b = await rpc("wms_bin_contents", { p_bin: v });
+    if (!b.ok) { bad(); return draw(`${v}: location not recognised.`, "bad"); }
+    good(); bin = b; draw(b.bin.active ? "" : "This location is switched off: you can only take stock out.", b.bin.active ? "" : "warn");
+  };
+  const after = async (res) => { done(); const b = await rpc("wms_bin_contents", { p_bin: res.bin }); bin = b;
+    draw(`✓ ${res.sku}: ${res.before} → ${res.after} in ${res.bin}. Scan the next product, or Done.`, "good"); };
+  onScan = async (v) => {
+    try {
+      if (!bin) return loadBin(v);
+      const here = bin.items.find((i) => i.sku.toUpperCase() === v.toUpperCase());
+      if (here) { good(); return adjBox(bin.bin.code, here, "add", after); }
+      const r = await rpc("wms_search_inventory", { p_query: v, p_limit: 1 });
+      const p = r[0];
+      if (!p) {   // maybe they scanned another location
+        const b = await rpc("wms_bin_contents", { p_bin: v });
+        if (b.ok) { good(); bin = b; return draw(); }
+        bad(); return draw(`${v}: product not recognised.`, "bad");
+      }
+      const inBin = bin.items.find((i) => i.sku === p.sku);
+      good(); adjBox(bin.bin.code, inBin ?? { sku: p.sku, name: p.name, variant: p.variant, image_url: p.image_url, on_hand: 0, allocated: 0 }, "add", after);
+    } catch (e) { bad(); draw(e.message, "bad"); }
+  };
+  if (binCode) loadBin(binCode); else draw();
+}
+
+// add / remove / set the count of one item in one location
+function adjBox(binCode, item, startMode, onDone) {
+  let mode = startMode, q = "", reason = "";
+  const now = item.on_hand ?? 0, res = item.allocated ?? 0;
+  const RS = { found: "Found stock", return: "Customer return", count_fix: "Count was wrong", damaged: "Damaged / faulty", other: "Other (write a note)" };
+  const draw = () => {
+    const n = Number(q || 0);
+    const after = mode === "add" ? now + n : mode === "remove" ? now - n : (q === "" ? now : n);
+    const change = after - now;
+    const list = change > 0 ? ["found", "return", "count_fix", "other"] : change < 0 ? ["damaged", "count_fix", "other"] : [];
+    if (!list.includes(reason)) reason = "";
+    const problem = after < 0 ? `Only ${now} here.` : after < res ? `${res} are reserved for carts, so it can't go below ${res}.` : "";
+    $("mpanel").innerHTML = `<h2>${esc(item.sku)} in ${esc(binCode)}</h2>
+      <div class="mono">${esc(item.name ?? "")}${item.variant ? " · " + esc(item.variant) : ""}</div>
+      <div class="seg3">${[["add", "+ Add"], ["remove", "− Remove"], ["set", "Set count"]].map(([k, l]) => `<button data-m="${k}" class="${mode === k ? "on" : ""}">${l}</button>`).join("")}</div>
+      <div class="nowafter"><div><span class="step">Now</span><b>${now}</b></div>
+        <div><span class="step">${mode === "add" ? "Add" : mode === "remove" ? "Remove" : "New count"}</span><b>${q || (mode === "set" ? now : 0)}</b></div>
+        <div><span class="step">After</span><b style="color:${problem ? "var(--red)" : change ? "var(--green)" : "var(--ink)"}">${after}</b></div></div>
+      ${res ? `<div class="mono">${res} RESERVED FOR CARTS</div>` : ""}
+      <div class="pad">${[1,2,3,4,5,6,7,8,9].map((d) => `<button data-n="${d}">${d}</button>`).join("")}<button data-n="C">Clear</button><button data-n="0">0</button><button data-n="B">⌫</button></div>
+      ${problem ? `<div class="msg bad">${problem}</div>` : ""}
+      ${list.length && !problem ? `<div class="step">Why?</div><div class="opts">${list.map((k) => `<button data-r="${k}" class="${k === reason ? "on" : ""}">${RS[k]}</button>`).join("")}</div>
+        ${reason === "other" ? `<input id="note" placeholder="What happened?" style="font-size:18px">` : ""}<div class="mono">Recorded against your name.</div>` : ""}
+      <div class="btns"><button class="ghost" id="ano">Cancel</button><button class="signal" id="ayes" disabled>${change > 0 ? `Add ${change}` : change < 0 ? `Remove ${-change}` : "Save"}</button></div>`;
+    $("mpanel").querySelectorAll("[data-m]").forEach((b) => b.onclick = () => { mode = b.dataset.m; q = ""; draw(); });
+    $("mpanel").querySelectorAll("[data-n]").forEach((b) => b.onclick = () => { const d = b.dataset.n;
+      q = d === "C" ? "" : d === "B" ? q.slice(0, -1) : (q + d).replace(/^0+(?=\d)/, "").slice(0, 5); draw(); });
+    $("mpanel").querySelectorAll("[data-r]").forEach((b) => b.onclick = () => { reason = b.dataset.r; draw(); });
+    const ok = () => { $("ayes").disabled = !(change && !problem && reason && (reason !== "other" || $("note")?.value.trim())); };
+    $("note")?.addEventListener("input", ok); ok();
+    $("ano").onclick = () => { $("modal").hidden = true; };
+    $("ayes").onclick = async () => { $("ayes").disabled = true;
+      try {
+        const r = await rpc("wms_adjust_stock", { p_bin: binCode, p_product: item.sku, p_mode: mode, p_qty: mode === "set" ? after : n, p_reason: reason, p_note: $("note")?.value.trim() || null });
+        $("modal").hidden = true;
+        if (!r.ok) { bad(); return msg(r.error === "BELOW_RESERVED" ? `${r.reserved} are reserved for carts: can't go below that.` : r.error === "NOT_ENOUGH" ? `Only ${r.on_hand} here.`
+          : ({ ...ERR, NOTE_REQUIRED: "Write a note.", BAD_REASON: "Pick a reason." }[r.error] ?? r.error), "bad"); }
+        onDone(r);
+      } catch (e) { $("modal").hidden = true; bad(); msg(e.message, "bad"); } };
+  };
+  draw(); $("modal").hidden = false;
 }
 
 // ===================== MOVE: from -> product -> qty -> to =====================
@@ -219,7 +321,7 @@ function merge(fromCode) {
 }
 
 const start = new URLSearchParams(location.search).get("do");
-start === "move" ? move() : start === "merge" ? merge() : menu();
+start === "move" ? move() : start === "merge" ? merge() : start === "adjust" ? adjust() : menu();
 </script>
 </body>
 </html>

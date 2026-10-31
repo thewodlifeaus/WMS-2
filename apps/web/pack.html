@@ -41,6 +41,8 @@
   .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
   .modal .panel{max-width:520px;width:100%}
   .modal h2{margin-bottom:8px}
+  .choose{display:grid;gap:6px;margin-top:8px}
+  .choose button{min-height:52px;text-align:left;font-size:18px}
   .flags{margin-top:10px;padding:14px 16px;background:#fbeaea;border-left:8px solid var(--red);color:var(--red)}
   .flags h3{color:var(--red);font-size:18px;margin-bottom:6px}
   .flags li{margin-left:18px;font-weight:700;color:#5a1010}
@@ -76,6 +78,7 @@
   <section>
     <input id="scan" placeholder="Scan tote or order number" autocomplete="off" spellcheck="false" autofocus>
     <div id="msg" class="msg">Scan a tote, or the order number on the packing slip.</div>
+    <div id="choose" class="choose" hidden></div>
     <div id="order" style="margin-top:14px" hidden>
       <div class="ohead"><h1 id="onum"></h1><span class="count" id="ocount"></span></div>
       <div class="mono" id="ometa"></div>
@@ -290,8 +293,10 @@ const ERR = {
   SHIPMENT_CLOSED: "This box is already closed.",
 };
 
+$("choose").addEventListener("click", (e) => { const b = e.target.closest("[data-order]"); if (b) startOrder(b.dataset.order); });
 async function startOrder(code, override = false) {
   if (!desk) { await chooseDesk(); if (!desk) return; }
+  $("choose").hidden = true;
   const { data, error } = await sb.rpc("wms_pack_start", { p_scan: code, p_pack_station_id: desk.id, p_override_hold: override });
   if (error) return failed(error);
   if (!data.ok) {
@@ -300,6 +305,13 @@ async function startOrder(code, override = false) {
       if (!boss) return say(`ON HOLD: #${data.order_number}. ${data.reason ?? ""} Ask a supervisor.`, "bad");
       if (await ask("Order on hold", `#${data.order_number}: ${data.reason ?? "On hold"}. Pack it anyway?`, "Pack anyway")) return startOrder(code, true);
       return say("Left on hold.", "warn");
+    }
+    if (data.error === "TOTE_HAS_ORDERS") {
+      good();
+      say(`Tote ${data.tote} has ${data.orders.length} orders. Pick the one you are packing (or scan its order number).`, "warn");
+      $("choose").innerHTML = data.orders.map((o) => `<button class="ghost" data-order="${esc(o.order_number)}">#${esc(o.order_number)} · ${esc(o.customer ?? "")} · ${o.units} pcs${o.status === "packing" ? " · started" : ""}</button>`).join("");
+      $("choose").hidden = false;
+      return;
     }
     if (data.error === "ALREADY_PACKED") {
       bad(); say(`#${data.order_number} is already packed (${data.status}). Use Reprint if the label is missing.`, "warn");

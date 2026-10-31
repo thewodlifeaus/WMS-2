@@ -39,12 +39,12 @@ begin
 
   -- pickers can't build carts
   perform set_config('request.jwt.claim.sub', pk::text, true);
-  begin perform wms_build_carts(array[o1,o2,o3], 12, array[c1,c2]); assert false, 'picker must not build carts';
+  begin perform wms_build_carts(array[o1,o2,o3], 12, p_cart_ids => array[c1,c2]); assert false, 'picker must not build carts';
   exception when insufficient_privilege then null; end;
   perform set_config('request.jwt.claim.sub', u::text, true);
 
   -- build: 2 per cart; express C2 first, then C3 (older than C1? no: C1 is oldest) -> C2, C1 on ZCART1; C3 on ZCART2
-  res := wms_build_carts(array[o1,o2,o3,o4,o5], 2, array[c1,c2]);
+  res := wms_build_carts(array[o1,o2,o3,o4,o5], 2, p_cart_ids => array[c1,c2]);
   assert (res->>'ok')::boolean and jsonb_array_length(res->'carts') = 2, res::text;
   assert jsonb_array_length(res->'skipped') = 2, 'no-service and held orders skipped: ' || res::text;
   assert res->'carts'->0->>'cart' = 'ZCART1' and (res->'carts'->0->>'orders')::int = 2, res::text;
@@ -53,7 +53,7 @@ begin
   assert (select status from orders where id = o2) = 'allocated', 'order allocated';
 
   -- cart now busy: building again finds no free cart among these two
-  res := wms_build_carts(array[o1], 2, array[c1,c2]);
+  res := wms_build_carts(array[o1], 2, p_cart_ids => array[c1,c2]);
   assert res->>'error' in ('NO_READY_ORDERS','NO_FREE_CARTS'), res::text;
 
   -- overview + detail with locations

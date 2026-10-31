@@ -25,7 +25,7 @@ begin
   insert into order_lines(order_id, product_id, sku, qty_ordered) values (o1, p1, 'PT-TEE', 2), (o1, p2, 'PT-CAP', 1), (o2, p3, 'PT-SOCK', 1);
   insert into carts(warehouse_id, code, barcode, basket_count) values (wh, 'ZPCART07', 'ZPCART07', 12) returning id into c1;
   insert into cart_baskets(barcode, kind, warehouse_id) values ('ZT1', 'tote', wh), ('ZT2', 'tote', wh);
-  res := wms_build_carts(array[o1, o2], 12, array[c1]);
+  res := wms_build_carts(array[o1, o2], 12, p_cart_ids => array[c1]);
   sess := (res->'carts'->0->>'session_id')::uuid;
 
   -- picker opens the cart by typing its number

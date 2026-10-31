@@ -7,53 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/brand.css?v=3">
-<style>
-  html,body{height:100%}
-  body{display:flex;flex-direction:column;user-select:none;-webkit-user-select:none}
-  main{flex:1;padding:14px;max-width:900px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:12px}
-  #scan{position:absolute;left:-9999px;opacity:0}
-  .big{font:900 64px/1 "IBM Plex Mono",monospace;color:var(--ink);letter-spacing:.02em;word-break:break-all}
-  .huge{font:900 88px/1 "IBM Plex Mono",monospace;color:var(--ink)}
-  .step{font:800 15px Archivo,system-ui,sans-serif;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
-  .msg{padding:14px 16px;font-weight:800;font-size:20px;border-left:8px solid var(--blue);background:var(--surface)}
-  .msg.bad{border-color:var(--red);background:#fbeaea;color:var(--red)}
-  .msg.good{border-color:var(--green);background:#e8f3ec;color:var(--green)}
-  .msg.warn{border-color:var(--amber);background:#fbf3e3;color:#6b4a10}
-  .card{background:var(--surface);border:1px solid var(--rule);padding:16px}
-  .loc{background:var(--ink);color:#fff;padding:18px 16px}
-  .loc .big{color:#fff} .loc .step{color:#bbb}
-  .loc.ok{background:var(--green)}
-  .prod{display:grid;grid-template-columns:140px 1fr;gap:14px;align-items:center}
-  .prod img,.prod .noimg{width:140px;height:140px;object-fit:cover;background:var(--panel)}
-  .pname{font-size:22px;font-weight:800;color:var(--ink)} .pvar{font:600 20px "IBM Plex Mono",monospace;color:var(--ink);margin-top:4px}
-  .psku{font:600 15px "IBM Plex Mono",monospace;color:var(--muted);margin-top:4px}
-  .qtyrow{display:flex;justify-content:space-between;align-items:end;gap:10px;flex-wrap:wrap}
-  .totes{display:flex;gap:8px;flex-wrap:wrap}
-  .tote{background:var(--blue);color:#fff;font:700 20px "IBM Plex Mono",monospace;padding:10px 14px}
-  .tote small{display:block;font-size:12px;opacity:.85}
-  .btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .btns button{min-height:64px;font-size:18px}
-  .prog{display:flex;justify-content:space-between;font:600 16px "IBM Plex Mono",monospace;color:var(--ink)}
-  .bar2{height:10px;background:var(--panel);border:1px solid var(--rule)} .bar2 i{display:block;height:100%;background:var(--green)}
-  .list{display:grid;gap:8px}
-  .cart{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--rule);padding:14px;min-height:72px}
-  .cart b.code{font:900 26px "IBM Plex Mono",monospace;color:var(--ink)}
-  .modal{position:fixed;inset:0;background:rgba(17,17,17,.7);display:grid;place-items:center;padding:14px;z-index:20}
-  .modal .panel{max-width:640px;width:100%;max-height:92vh;overflow:auto;display:grid;gap:12px}
-  .opts{display:grid;gap:8px}
-  .opts button{min-height:58px;text-align:left;font-size:18px;background:var(--surface);color:var(--ink);border:2px solid var(--rule)}
-  .opts button.on{border-color:var(--ink);background:#eef1f8}
-  .redwarn{background:#fbeaea;border-left:8px solid var(--red);color:var(--red);padding:12px;font-weight:800;font-size:17px}
-  .check{display:flex;gap:12px;align-items:flex-start;font-weight:700;font-size:17px}
-  .check input{width:30px;min-height:30px;flex:none}
-  .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-  .pad button{min-height:64px;font-size:26px;background:var(--surface);color:var(--ink);border:1px solid var(--rule)}
-  .qtyshow{font:900 56px "IBM Plex Mono",monospace;text-align:center;color:var(--ink)}
-  .typebox{display:flex;gap:8px} .typebox input{font:700 24px "IBM Plex Mono",monospace;text-transform:uppercase}
-  .stat{display:flex;gap:16px;flex-wrap:wrap} .stat div{background:var(--surface);border:1px solid var(--rule);padding:10px 14px}
-  .stat b{display:block;font:900 30px "IBM Plex Mono",monospace;color:var(--ink)}
-  .flash-bad{animation:fb .6s 2} @keyframes fb{50%{background:#f6c8c8}}
-</style>
+<link rel="stylesheet" href="/css/tablet.css?v=1">
 </head>
 <body>
 <div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc" id="hdr">PICKING</span><span class="mono" style="color:#ccc" id="who"></span></div>
@@ -97,7 +51,7 @@ async function home(note, kind) {
     <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Scan the barcode on the cart, or type its number.")}</div>
     <div class="stat" id="rate"></div>
     <div class="step" style="margin-top:6px">Carts waiting to be picked</div><div class="list" id="carts"><div class="mono">Loading…</div></div>
-    <button class="ghost" id="out" style="margin-top:10px">Sign out</button>`;
+    <div class="btns" style="margin-top:10px"><a class="ghost tbtn" href="/stock.html">Stock tools (move / merge / look up)</a><button class="ghost" id="out">Sign out</button></div>`;
   onScan = (v) => openCart(v);
   $("gotype").onclick = () => { const v = $("typecart").value.trim(); if (v) openCart(v); };
   $("typecart").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gotype").click(); });
@@ -144,11 +98,12 @@ async function refresh() { state = await rpc("wms_pick_state", { p_session_id: s
 
 // ===================== TOTES: one per order =====================
 function toteScreen() {
-  const next = state.need_totes[0], n = state.orders - state.need_totes.length + 1;
-  app.innerHTML = `<div class="step">Set up ${esc(state.cart)} · tote ${n} of ${state.orders}</div>
-    <div class="card"><div class="step">Scan an empty tote for order</div><div class="big">#${esc(next)}</div></div>
+  const next = state.need_totes[0], total = state.tote_slots ?? state.orders, n = total - state.need_totes.length + 1;
+  const shared = next.includes(",");
+  app.innerHTML = `<div class="step">Set up ${esc(state.cart)} · tote ${n} of ${total}</div>
+    <div class="card"><div class="step">Scan an empty tote for ${shared ? "these orders (they share one tote)" : "order"}</div><div class="big" style="${shared ? "font-size:34px" : ""}">${esc(next)}</div></div>
     <div id="msg" class="msg">Scan the tote barcode, then put the tote on the cart.</div>
-    ${state.totes.length ? `<div class="totes">${state.totes.map((t) => `<span class="tote">${esc(t.tote)}<small>#${esc(t.order_number)}</small></span>`).join("")}</div>` : ""}
+    ${state.totes.length ? `<div class="totes">${state.totes.map((t) => `<span class="tote">${esc(t.tote)}<small>${esc(t.orders)}</small></span>`).join("")}</div>` : ""}
     <div class="btns"><button class="ghost" id="pause">Pause</button><span></span></div>`;
   $("pause").onclick = pauseBox;
   onScan = async (v) => {

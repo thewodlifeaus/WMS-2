@@ -41,6 +41,14 @@
   .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
   .modal .panel{max-width:520px;width:100%}
   .modal h2{margin-bottom:8px}
+  .flags{margin-top:10px;padding:14px 16px;background:#fbeaea;border-left:8px solid var(--red);color:var(--red)}
+  .flags h3{color:var(--red);font-size:18px;margin-bottom:6px}
+  .flags li{margin-left:18px;font-weight:700;color:#5a1010}
+  .flags .note{color:#6b4a10;font-weight:700}
+  .flags .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .flags button{min-height:40px}
+  .lineflag{display:inline-block;margin-top:4px;font:700 12px "IBM Plex Mono",monospace;background:var(--red);color:#fff;padding:3px 6px}
+  .lineflag.amber{background:var(--amber);color:#111}
   .passbtn{min-height:36px;padding:0 10px;font-size:13px;margin-top:6px}
   .mp-prod{display:grid;grid-template-columns:96px 1fr;gap:12px;align-items:center;padding:10px;background:var(--surface);border:1px solid var(--rule);margin:10px 0}
   .mp-prod img,.mp-prod .noimg{width:96px;height:96px;object-fit:cover}
@@ -71,6 +79,7 @@
     <div id="order" style="margin-top:14px" hidden>
       <div class="ohead"><h1 id="onum"></h1><span class="count" id="ocount"></span></div>
       <div class="mono" id="ometa"></div>
+      <div id="flags"></div>
       <div id="lines"></div>
     </div>
   </section>
@@ -236,9 +245,19 @@ function render(v) {
   $("onum").textContent = `#${v.order.order_number}`;
   $("ocount").textContent = `${v.units_packed ?? 0} / ${v.units_total ?? 0}`;
   $("ometa").textContent = [v.order.customer, [v.order.city, v.order.state, v.order.country].filter(Boolean).join(" "), v.order.requested_service].filter(Boolean).join(" · ");
+  const fl = v.pick_flags ?? [], missing = fl.filter((f) => f.kind === "missing"), unscanned = fl.filter((f) => f.kind !== "missing");
+  $("flags").innerHTML = fl.length ? `<div class="flags">
+      <h3>${missing.length ? "⚠ The picker could not pick everything on this order" : "⚠ The picker picked some items without scanning"}</h3>
+      <ul>${fl.map((f) => `<li>${f.qty} × ${esc(f.sku)} · ${f.kind === "missing" ? "MISSING" : "picked without scan"}: ${esc(FLAG[f.reason] ?? f.reason)}${f.bin ? ` (at ${esc(f.bin)})` : ""}${f.picker ? ` · ${esc(f.picker)}` : ""}${f.note ? ` · "${esc(f.note)}"` : ""}</li>`).join("")}</ul>
+      ${missing.length ? `<div class="note">Check the cart and the tote. If the item really is missing, put this order on hold.</div>` : `<div class="note">Check these items carefully against the order before you scan them.</div>`}
+      ${v.order.is_held ? `<div class="row"><span class="chip amber">ON HOLD: ${esc(v.order.hold_reason ?? "")}</span></div>`
+        : missing.length ? `<div class="row"><button class="ghost" id="holdbtn" style="color:var(--red);border-color:var(--red)">Put order on hold (missing item)</button></div>` : ""}
+    </div>` : "";
+  $("holdbtn")?.addEventListener("click", holdOrder);
   $("lines").innerHTML = (v.lines ?? []).map((l) => `<div class="line ${l.remaining === 0 ? "done" : ""}" data-sku="${esc(l.sku)}">
       ${l.image_url ? `<img src="${esc(l.image_url + (l.image_url.includes("?") ? "&" : "?") + "width=128")}" alt="">` : `<div class="noimg"></div>`}
       <div><div><b>${esc(l.name)}</b> ${l.variant ? `<span class="mono">${esc(l.variant)}</span>` : ""}</div><div class="sku">${esc(l.sku)}</div>
+        ${(l.pick_flag ?? []).map((f) => `<span class="lineflag ${f.kind === "missing" ? "" : "amber"}">${f.kind === "missing" ? `PICKER: ${f.qty} MISSING` : `PICKER: ${f.qty} NOT SCANNED`} · ${esc(FLAG[f.reason] ?? f.reason)}</span>`).join(" ")}
         ${v.status === "packing" && l.remaining > 0 ? `<button class="ghost passbtn" data-pass="${esc(l.order_line_id)}">Can't scan? Pass manually</button>` : ""}</div>
       <div class="q">${l.qty_packed}/${l.qty_ordered}</div></div>`).join("");
   refreshShip();
@@ -249,6 +268,18 @@ function refreshShip() {
   $("ship").disabled = !ready;
 }
 
+const FLAG = { not_in_location: "Not in location", damaged_stock: "Damaged stock", not_enough: "Not enough in location",
+  no_barcode: "No barcode", barcode_wont_scan: "Barcode wouldn't scan", other: "Other" };
+async function holdOrder() {
+  const missing = (view.pick_flags ?? []).filter((f) => f.kind === "missing").map((f) => `${f.qty} x ${f.sku}`).join(", ");
+  if (!(await ask("Put on hold?", `#${view.order.order_number} goes on hold as a missing item order (${missing}). Put the box and items aside for a supervisor.`, "Put on hold"))) return;
+  const { data, error } = await sb.rpc("wms_pack_hold", { p_shipment_id: view.shipment_id, p_reason: `Missing item at packing: ${missing}` });
+  if (error) return failed(error);
+  if (!data.ok) { bad(); return say(data.error, "bad"); }
+  beep(600, 150);
+  say(`#${view.order.order_number} is ON HOLD. Put it aside for a supervisor, then scan the next order.`, "warn");
+  render(null);
+}
 const ERR = {
   ORDER_NOT_FOUND: "Order or tote not found. Check the number and scan again.",
   ORDER_NOT_READY: "This order isn't ready to pack yet.",
@@ -279,7 +310,9 @@ async function startOrder(code, override = false) {
   }
   good(); render(data);
   const warn = (data.warnings ?? []).find((w) => w.type === "ORDER_ON_HOLD");
-  say(warn ? `ON HOLD (packing anyway): ${warn.reason ?? ""}` : data.complete ? "All items scanned. Put the box on the scale." : "Scan each item.", warn ? "warn" : "");
+  const flagged = (data.pick_flags ?? []).length;
+  if (flagged) bad();
+  say(warn ? `ON HOLD (packing anyway): ${warn.reason ?? ""}` : flagged ? "Read the picker's warning below before packing." : data.complete ? "All items scanned. Put the box on the scale." : "Scan each item.", warn || flagged ? "warn" : "");
 }
 
 async function scanItem(code) {

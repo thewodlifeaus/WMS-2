@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="mobile-web-app-capable" content="yes"><meta name="theme-color" content="#111111">
+<title>Picking · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  html,body{height:100%}
+  body{display:flex;flex-direction:column;user-select:none;-webkit-user-select:none}
+  main{flex:1;padding:14px;max-width:900px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+  #scan{position:absolute;left:-9999px;opacity:0}
+  .big{font:900 64px/1 "IBM Plex Mono",monospace;color:var(--ink);letter-spacing:.02em;word-break:break-all}
+  .huge{font:900 88px/1 "IBM Plex Mono",monospace;color:var(--ink)}
+  .step{font:800 15px Archivo,system-ui,sans-serif;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  .msg{padding:14px 16px;font-weight:800;font-size:20px;border-left:8px solid var(--blue);background:var(--surface)}
+  .msg.bad{border-color:var(--red);background:#fbeaea;color:var(--red)}
+  .msg.good{border-color:var(--green);background:#e8f3ec;color:var(--green)}
+  .msg.warn{border-color:var(--amber);background:#fbf3e3;color:#6b4a10}
+  .card{background:var(--surface);border:1px solid var(--rule);padding:16px}
+  .loc{background:var(--ink);color:#fff;padding:18px 16px}
+  .loc .big{color:#fff} .loc .step{color:#bbb}
+  .loc.ok{background:var(--green)}
+  .prod{display:grid;grid-template-columns:140px 1fr;gap:14px;align-items:center}
+  .prod img,.prod .noimg{width:140px;height:140px;object-fit:cover;background:var(--panel)}
+  .pname{font-size:22px;font-weight:800;color:var(--ink)} .pvar{font:600 20px "IBM Plex Mono",monospace;color:var(--ink);margin-top:4px}
+  .psku{font:600 15px "IBM Plex Mono",monospace;color:var(--muted);margin-top:4px}
+  .qtyrow{display:flex;justify-content:space-between;align-items:end;gap:10px;flex-wrap:wrap}
+  .totes{display:flex;gap:8px;flex-wrap:wrap}
+  .tote{background:var(--blue);color:#fff;font:700 20px "IBM Plex Mono",monospace;padding:10px 14px}
+  .tote small{display:block;font-size:12px;opacity:.85}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .btns button{min-height:64px;font-size:18px}
+  .prog{display:flex;justify-content:space-between;font:600 16px "IBM Plex Mono",monospace;color:var(--ink)}
+  .bar2{height:10px;background:var(--panel);border:1px solid var(--rule)} .bar2 i{display:block;height:100%;background:var(--green)}
+  .list{display:grid;gap:8px}
+  .cart{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--rule);padding:14px;min-height:72px}
+  .cart b.code{font:900 26px "IBM Plex Mono",monospace;color:var(--ink)}
+  .modal{position:fixed;inset:0;background:rgba(17,17,17,.7);display:grid;place-items:center;padding:14px;z-index:20}
+  .modal .panel{max-width:640px;width:100%;max-height:92vh;overflow:auto;display:grid;gap:12px}
+  .opts{display:grid;gap:8px}
+  .opts button{min-height:58px;text-align:left;font-size:18px;background:var(--surface);color:var(--ink);border:2px solid var(--rule)}
+  .opts button.on{border-color:var(--ink);background:#eef1f8}
+  .redwarn{background:#fbeaea;border-left:8px solid var(--red);color:var(--red);padding:12px;font-weight:800;font-size:17px}
+  .check{display:flex;gap:12px;align-items:flex-start;font-weight:700;font-size:17px}
+  .check input{width:30px;min-height:30px;flex:none}
+  .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .pad button{min-height:64px;font-size:26px;background:var(--surface);color:var(--ink);border:1px solid var(--rule)}
+  .qtyshow{font:900 56px "IBM Plex Mono",monospace;text-align:center;color:var(--ink)}
+  .typebox{display:flex;gap:8px} .typebox input{font:700 24px "IBM Plex Mono",monospace;text-transform:uppercase}
+  .stat{display:flex;gap:16px;flex-wrap:wrap} .stat div{background:var(--surface);border:1px solid var(--rule);padding:10px 14px}
+  .stat b{display:block;font:900 30px "IBM Plex Mono",monospace;color:var(--ink)}
+  .flash-bad{animation:fb .6s 2} @keyframes fb{50%{background:#f6c8c8}}
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc" id="hdr">PICKING</span><span class="mono" style="color:#ccc" id="who"></span></div>
+<input id="scan" inputmode="none" autocomplete="off" autocapitalize="characters" spellcheck="false">
+<main id="app"></main>
+<div class="modal" id="modal" hidden><div class="panel" id="mpanel"></div></div>
+
+<script type="module">
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=3";
+const me = await requireLogin();
+if (me?.role === "display") location.href = "/tv.html";
+const boss = ["admin", "supervisor"].includes(me?.role);
+const $ = (id) => document.getElementById(id);
+$("who").textContent = (me?.name ?? "").toUpperCase();
+const app = $("app"), scan = $("scan");
+
+// ---------- sounds ----------
+let ac; const tone = (f, ms, n = 1, gap = 60) => { try { ac ??= new AudioContext(); for (let i = 0; i < n; i++) { const o = ac.createOscillator(), g = ac.createGain();
+  o.frequency.value = f; o.connect(g); g.connect(ac.destination); const t = ac.currentTime + i * (ms + gap) / 1000; g.gain.setValueAtTime(.25, t); o.start(t); o.stop(t + ms / 1000); } } catch {} };
+const good = () => tone(1300, 70), bad = () => { tone(200, 250, 3); navigator.vibrate?.([200, 80, 200]); }, done = () => { tone(900, 90); setTimeout(() => tone(1400, 160), 120); };
+
+// ---------- scanner: Bluetooth scanner types into a hidden box + Enter ----------
+let onScan = null;
+const keepFocus = () => { if ($("modal").hidden && !document.activeElement?.matches?.("input:not(#scan)")) scan.focus(); };
+setInterval(keepFocus, 800); document.addEventListener("click", () => setTimeout(keepFocus, 50));
+scan.addEventListener("keydown", (e) => { if (e.key !== "Enter") return; const v = scan.value.trim().toUpperCase(); scan.value = ""; if (v && onScan) onScan(v); });
+async function rpc(fn, args) {
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) { if (/NOT_STAFF|JWT/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/pick.html"; } throw error; }
+  return data;
+}
+const msg = (text, kind = "") => { const m = document.getElementById("msg"); if (m) { m.className = "msg " + kind; m.textContent = text; if (kind === "bad") { m.classList.remove("flash-bad"); void m.offsetWidth; m.classList.add("flash-bad"); } } };
+const reasonLabel = { break: "Break", bathroom: "Bathroom", end_of_shift: "End of shift", other: "Other" };
+
+// ===================== HOME: pick a cart =====================
+let state = null, binOk = false;
+async function home(note, kind) {
+  state = null; binOk = false; $("hdr").textContent = "PICKING";
+  app.innerHTML = `<div class="step">Start picking</div><div class="huge" style="font-size:44px">Scan a cart</div>
+    <div class="typebox"><input id="typecart" placeholder="or type cart number, eg 7" inputmode="numeric"><button id="gotype">Open</button></div>
+    <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Scan the barcode on the cart, or type its number.")}</div>
+    <div class="stat" id="rate"></div>
+    <div class="step" style="margin-top:6px">Carts waiting to be picked</div><div class="list" id="carts"><div class="mono">Loading…</div></div>
+    <button class="ghost" id="out" style="margin-top:10px">Sign out</button>`;
+  onScan = (v) => openCart(v);
+  $("gotype").onclick = () => { const v = $("typecart").value.trim(); if (v) openCart(v); };
+  $("typecart").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gotype").click(); });
+  $("out").onclick = signOut;
+  try {
+    const carts = await rpc("wms_pick_carts_available");
+    const STATE = { not_started: ["Ready", "var(--green)"], paused: ["Paused", "var(--amber)"], released: ["Needs a picker", "var(--orange)"], picking: ["Being picked", "var(--blue)"] };
+    $("carts").innerHTML = carts.length ? carts.map((c) => { const [l, col] = STATE[c.state] ?? [c.state, "var(--muted)"];
+      return `<div class="cart" data-cart="${esc(c.cart_barcode)}"><b class="code">${esc(c.cart)}</b>
+        <div><b>${c.orders}</b> orders · <b>${c.units - c.picked}</b> units to pick${c.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}
+          <div class="split mono">${c.mine ? "YOUR CART · " : c.picker ? esc(c.picker).toUpperCase() + " · " : ""}${c.pause_reason ? esc(reasonLabel[c.pause_reason] ?? c.pause_reason).toUpperCase() + " · " : ""}START ${esc(c.first_bin ?? "-")}</div></div>
+        <span class="chip" style="background:${col}">${l}</span></div>`; }).join("")
+      : `<div class="card">No carts waiting. Ask a supervisor to build carts in Orders and carts.</div>`;
+    const rates = await rpc("wms_pick_rates");
+    const mine = rates.find((r) => r.staff_id === me.id);
+    if (mine) $("rate").innerHTML = `<div><span class="mono">Units today</span><b>${fmt(mine.units)}</b></div><div><span class="mono">Units / hour</span><b>${mine.units_per_hour ?? "-"}</b></div><div><span class="mono">Carts done</span><b>${mine.carts}</b></div>`;
+  } catch (e) { msg(e.message, "bad"); }
+}
+app.addEventListener("click", (e) => { const c = e.target.closest("[data-cart]"); if (c && !state) openCart(c.dataset.cart); });
+
+async function openCart(code, takeOver = false) {
+  try {
+    const r = await rpc("wms_pick_open_cart", { p_cart: code, p_take_over: takeOver });
+    if (!r.ok) {
+      bad();
+      if (r.error === "CART_IN_USE") {
+        if (r.can_take_over && await confirmBox("Cart in use", `${r.cart} is being picked by ${r.picker}. Take it over?`, "Take over")) return openCart(code, true);
+        return msg(`${r.cart} is being picked by ${r.picker}.`, "bad");
+      }
+      return msg({ CART_NOT_FOUND: `Cart "${code}" not found.`, NOTHING_ON_CART: `${r.cart} has nothing to pick. Ask a supervisor to build it.` }[r.error] ?? r.error, "bad");
+    }
+    good(); state = r; binOk = false; route();
+  } catch (e) { bad(); msg(e.message, "bad"); }
+}
+
+// decide which screen
+function route() {
+  $("hdr").textContent = `${state.cart} · PICKING`;
+  if (state.need_totes?.length) return toteScreen();
+  if (state.current?.done || state.all_picked) return finishScreen();
+  return pickScreen();
+}
+async function refresh() { state = await rpc("wms_pick_state", { p_session_id: state.session_id }); route(); }
+
+// ===================== TOTES: one per order =====================
+function toteScreen() {
+  const next = state.need_totes[0], n = state.orders - state.need_totes.length + 1;
+  app.innerHTML = `<div class="step">Set up ${esc(state.cart)} · tote ${n} of ${state.orders}</div>
+    <div class="card"><div class="step">Scan an empty tote for order</div><div class="big">#${esc(next)}</div></div>
+    <div id="msg" class="msg">Scan the tote barcode, then put the tote on the cart.</div>
+    ${state.totes.length ? `<div class="totes">${state.totes.map((t) => `<span class="tote">${esc(t.tote)}<small>#${esc(t.order_number)}</small></span>`).join("")}</div>` : ""}
+    <div class="btns"><button class="ghost" id="pause">Pause</button><span></span></div>`;
+  $("pause").onclick = pauseBox;
+  onScan = async (v) => {
+    try {
+      const r = await rpc("wms_assign_totes", { p_session_id: state.session_id, p_tote_barcodes: [v] });
+      if (!r.ok) { bad(); return msg({ UNKNOWN_TOTE: `${v} is not a tote.`, TOTE_IN_USE: `Tote ${v} is already in use. Use another tote.` }[r.error] ?? r.error, "bad"); }
+      good(); await refresh();
+    } catch (e) { bad(); msg(e.message, "bad"); }
+  };
+}
+
+// ===================== PICK: location -> product =====================
+function pickScreen() {
+  const t = state.current.task, p = state.current.progress;
+  const left = t.qty_required - t.qty_picked;
+  const pct = state.units ? Math.round(100 * state.picked / state.units) : 0;
+  const holds = (t.put_into ?? []).filter((x) => x.on_hold);
+  app.innerHTML = `
+    <div class="prog"><span>STOP ${p.done + 1} OF ${p.total}</span><span>${state.picked}/${state.units} UNITS</span></div>
+    <div class="bar2"><i style="width:${pct}%"></i></div>
+    <div class="loc ${binOk ? "ok" : ""}"><div class="step">${binOk ? "✓ Location confirmed" : "Go to location, scan the location label"}</div><div class="big">${esc(t.bin)}</div></div>
+    <div class="card prod">${t.image_url ? `<img src="${esc(t.image_url + (t.image_url.includes("?") ? "&" : "?") + "width=280")}" alt="">` : `<div class="noimg"></div>`}
+      <div><div class="pname">${esc(t.name)}</div>${t.variant ? `<div class="pvar">${esc(t.variant)}</div>` : ""}<div class="psku">${esc(t.sku)}</div></div></div>
+    <div class="qtyrow"><div><div class="step">Pick</div><div class="huge">${left}</div></div>
+      <div><div class="step">Put into</div><div class="totes">${(t.put_into ?? []).filter((x) => x.qty > x.qty_picked).map((x) =>
+        `<span class="tote">${esc(x.basket_barcode ?? "#" + x.order_number)} ×${x.qty - x.qty_picked}<small>#${esc(x.order_number)}</small></span>`).join("")}</div></div></div>
+    ${holds.length ? `<div class="msg warn">ON HOLD: #${holds.map((h) => esc(h.order_number)).join(", #")}. Pick it, but tell your supervisor.</div>` : ""}
+    <div id="msg" class="msg">${binOk ? "Now scan the product." : `Scan the location label at ${esc(t.bin)}.`}</div>
+    <div class="btns"><button class="ghost" id="cant" style="color:var(--red);border-color:var(--red)">Can't pick this</button><button class="ghost" id="pause">Pause</button></div>`;
+  $("pause").onclick = pauseBox;
+  $("cant").onclick = () => cantPickBox(t);
+  onScan = async (v) => {
+    try {
+      if (!binOk) {
+        const r = await rpc("wms_confirm_bin", { p_task_id: t.id, p_bin_barcode: v });
+        if (!r.ok) { bad(); return msg(`WRONG LOCATION. You scanned ${v}. Go to ${r.expected_bin}.`, "bad"); }
+        good(); binOk = true; return pickScreen();
+      }
+      if (left > 1) return qtyBox(t, v, left);
+      await doPick(t, v, 1);
+    } catch (e) { bad(); msg(e.message, "bad"); }
+  };
+}
+async function doPick(t, barcode, qty) {
+  const r = await rpc("wms_pick_scan", { p_task_id: t.id, p_barcode: barcode, p_qty: qty });
+  if (!r.ok) {
+    bad();
+    return msg({ WRONG_ITEM: `WRONG ITEM. You scanned ${r.scanned_sku}. Need ${r.expected_sku}.`, UNKNOWN_BARCODE: "Barcode not recognised. Scan the product barcode.",
+      OVER_QTY: `Too many. Only ${r.remaining} needed.`, NOT_CURRENT_TASK: "That's not this stop. Refreshing…", SESSION_NOT_STARTED: "Cart is paused. Scan the cart to resume." }[r.error] ?? r.error, "bad");
+  }
+  const into = (r.put_into ?? []).map((x) => `${x.qty} into #${x.order_number}`).join(", ");
+  if (r.task_done) { binOk = false; }
+  good(); await refresh();
+  msg(`✓ ${r.qty} picked${into ? `: ${into}` : ""}.`, "good");
+}
+
+// quantity pad (scan once, enter how many)
+function qtyBox(t, barcode, left) {
+  let q = String(left);
+  const draw = () => { $("mpanel").innerHTML = `<h2>How many ${esc(t.sku)}?</h2><div class="qtyshow" id="qv">${q || "0"}</div>
+    <div class="mono" style="text-align:center">${left} NEEDED</div>
+    <div class="pad">${[1,2,3,4,5,6,7,8,9].map((n) => `<button data-n="${n}">${n}</button>`).join("")}<button data-n="C">Clear</button><button data-n="0">0</button><button data-n="B">⌫</button></div>
+    <div class="btns"><button class="ghost" id="qno">Cancel</button><button class="signal" id="qyes">Pick ${q || 0}</button></div>`;
+    $("mpanel").onclick = (e) => { const b = e.target.closest("[data-n]"); if (!b) return; const n = b.dataset.n;
+      q = n === "C" ? "" : n === "B" ? q.slice(0, -1) : (q === String(left) && q.length ? n : (q + n).replace(/^0+/, "")); draw(); };
+    $("qno").onclick = () => { $("modal").hidden = true; };
+    $("qyes").onclick = async () => { const n = Number(q); if (!n) return; $("modal").hidden = true; try { await doPick(t, barcode, n); } catch (e) { bad(); msg(e.message, "bad"); } }; };
+  draw(); $("modal").hidden = false;
+}
+
+// can't pick: reason + warning + confirm
+function cantPickBox(t) {
+  const left = t.qty_required - t.qty_picked;
+  let reason = "", qty = left;
+  const R = [["not_in_location","Not in location","missing"],["damaged_stock","Damaged stock","missing"],["not_enough","Not enough in location","missing"],
+             ["no_barcode","No barcode (item is in my hand)","have"],["barcode_wont_scan","Barcode won't scan (item is in my hand)","have"],["other","Other (write a note)","missing"]];
+  const draw = () => { const have = R.find((r) => r[0] === reason)?.[2] === "have";
+    $("mpanel").innerHTML = `<h2>Can't pick ${esc(t.sku)}?</h2>
+    <div class="redwarn">Only use this if you genuinely cannot scan or find the item. Every override is recorded against your name and checked at packing. Incorrect overrides may result in disciplinary action.</div>
+    <div class="opts">${R.map(([k, l]) => `<button data-r="${k}" class="${k === reason ? "on" : ""}">${l}</button>`).join("")}</div>
+    ${reason === "other" ? `<input id="note" placeholder="What happened?" style="font-size:18px">` : ""}
+    ${reason && !have ? `<div class="msg warn">${left > 1 ? `If you found some, cancel and scan those first. ` : ""}${left} will be marked MISSING and the packer will be told.</div>` : ""}
+    ${have ? `<div class="msg">${left} will be picked without scanning. The packer will check it.</div>` : ""}
+    ${reason ? `<label class="check"><input type="checkbox" id="ok"><span>${have ? "I have checked the item in my hand. It is exactly this product, size and colour." : "I have checked the location and the item is not there / not usable."}</span></label>` : ""}
+    <div class="btns"><button class="ghost" id="xno">Cancel</button><button id="xyes" style="background:var(--red);border-color:var(--red)" disabled>Confirm</button></div>`;
+    const valid = () => { $("xyes").disabled = !(reason && $("ok")?.checked && (reason !== "other" || $("note")?.value.trim())); };
+    $("mpanel").querySelectorAll("[data-r]").forEach((b) => b.onclick = () => { reason = b.dataset.r; draw(); });
+    $("ok")?.addEventListener("change", valid); $("note")?.addEventListener("input", valid);
+    $("xno").onclick = () => { $("modal").hidden = true; };
+    $("xyes").onclick = async () => { $("xyes").disabled = true;
+      try { const r = await rpc("wms_pick_exception", { p_task_id: t.id, p_reason: reason, p_confirmed: true, p_qty: qty, p_note: $("note")?.value.trim() || null });
+        $("modal").hidden = true;
+        if (!r.ok) { bad(); return msg(r.error, "bad"); }
+        tone(600, 120); binOk = false; state = r; route();
+        msg(r.kind === "missing" ? `${r.qty} × ${t.sku} marked missing. The packer will see it.` : `${r.qty} × ${t.sku} picked without scan (recorded).`, "warn");
+      } catch (e) { $("modal").hidden = true; bad(); msg(e.message, "bad"); } };
+    valid(); };
+  draw(); $("modal").hidden = false;
+}
+
+// pause
+function pauseBox() {
+  $("mpanel").innerHTML = `<h2>Pause ${esc(state.cart)}</h2><div class="opts">
+    ${Object.entries(reasonLabel).map(([k, l]) => `<button data-p="${k}">${l}${k === "end_of_shift" ? " (another picker can carry on)" : ""}</button>`).join("")}</div>
+    <div class="btns"><button class="ghost" id="pno">Keep picking</button><span></span></div>`;
+  $("mpanel").querySelectorAll("[data-p]").forEach((b) => b.onclick = async () => {
+    try { const r = await rpc("wms_pick_pause", { p_session_id: state.session_id, p_reason: b.dataset.p }); $("modal").hidden = true;
+      if (!r.ok) return msg(r.error, "bad");
+      tone(700, 120); home(`${r.cart} paused (${reasonLabel[b.dataset.p]}). Scan the cart to carry on.`, "warn");
+    } catch (e) { $("modal").hidden = true; msg(e.message, "bad"); } });
+  $("pno").onclick = () => { $("modal").hidden = true; };
+  $("modal").hidden = false;
+}
+
+// ===================== FINISH: scan the cart again =====================
+function finishScreen() {
+  done();
+  app.innerHTML = `<div class="card" style="border:3px solid var(--green)"><div class="step">All items picked</div>
+    <div class="big" style="font-size:44px">Scan ${esc(state.cart)} to finish</div></div>
+    <div class="typebox"><input id="typecart" placeholder="or type cart number" inputmode="numeric"><button id="gotype">Finish</button></div>
+    <div id="msg" class="msg">${state.exceptions ? `${state.exceptions} item(s) flagged. The packer will be told.` : "Then take the cart to packing."}</div>`;
+  const fin = async (v) => {
+    try { const r = await rpc("wms_pick_finish_cart", { p_session_id: state.session_id, p_cart: v });
+      if (!r.ok) { bad(); return msg(r.error === "WRONG_CART" ? `That's not ${r.expected}. Scan ${r.expected}.` : r.error, "bad"); }
+      done(); summary(r);
+    } catch (e) { bad(); msg(e.message, "bad"); } };
+  onScan = fin;
+  $("gotype").onclick = () => { const v = $("typecart").value.trim(); if (v) fin(v); };
+}
+function summary(r) {
+  state = null; $("hdr").textContent = "PICKING";
+  app.innerHTML = `<div class="card" style="border:3px solid var(--green)"><div class="step">Cart finished</div><div class="big" style="font-size:44px">${esc(r.cart)} → packing</div></div>
+    <div class="stat"><div><span class="mono">Units</span><b>${r.units}</b></div><div><span class="mono">Orders</span><b>${r.orders}</b></div>
+      <div><span class="mono">Minutes</span><b>${r.minutes}</b></div><div><span class="mono">Units / hour</span><b>${r.units_per_hour ?? "-"}</b></div></div>
+    ${r.missing.length ? `<div class="msg warn">Missing: ${r.missing.map((m) => `${m.qty} × ${esc(m.sku)} (#${esc(m.order_number)})`).join(", ")}</div>` : ""}
+    <button class="signal" id="next" style="min-height:70px;font-size:22px">Next cart</button>`;
+  onScan = (v) => openCart(v);
+  $("next").onclick = () => home("Scan your next cart.");
+}
+
+function confirmBox(title, body, yes) {
+  return new Promise((res) => { $("mpanel").innerHTML = `<h2>${esc(title)}</h2><p style="font-size:18px">${esc(body)}</p>
+    <div class="btns"><button class="ghost" id="cno">Cancel</button><button class="signal" id="cyes">${esc(yes)}</button></div>`;
+    $("modal").hidden = false; $("cyes").onclick = () => { $("modal").hidden = true; res(true); }; $("cno").onclick = () => { $("modal").hidden = true; res(false); }; });
+}
+home();
+</script>
+</body>
+</html>

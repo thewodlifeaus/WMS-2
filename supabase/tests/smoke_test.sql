@@ -174,7 +174,7 @@ begin
   cur := wms_start_pick_session(sess, 'CART:T1');
   res := wms_pick_short((cur->'task'->>'id')::uuid);
   assert (res->>'ok')::boolean and (res->>'session_done')::boolean, res::text;
-  assert (select count(*) from orders where order_number in ('T3001','T3002') and status = 'on_hold') = 2, 'short orders go on hold';
+  assert (select count(*) from orders where order_number in ('T3001','T3002') and status = 'picked') = 2, 'short orders go to the pack desk (packer decides on hold)';
   assert (select qty_allocated from bin_inventory bi join bins b on b.id = bi.bin_id
            where b.code = 'A-01-03' and bi.product_id = p_sm) = 1, 'short pick releases its allocation (1 left for the 2nd wave cart)';
 

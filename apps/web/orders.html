@@ -74,6 +74,10 @@
     <div class="cardsWrap">
       <div class="toolbar"><span class="mono" id="cartsum"></span><span style="flex:1"></span><button class="ghost" id="refreshCarts">Refresh</button></div>
       <div class="carts" id="carts"></div>
+      <h3 style="margin:16px 0 6px">Picking rates today</h3>
+      <div style="overflow-x:auto"><table><thead><tr><th>Picker</th><th class="num">Units</th><th class="num">Carts</th><th class="num">Active time</th><th class="num">Units / hour</th><th class="num">Missing</th><th class="num">Not scanned</th></tr></thead>
+        <tbody id="rates"><tr><td colspan="7" class="mono">Loading…</td></tr></tbody></table></div>
+      <p class="mono" style="margin-top:4px">Active time excludes pauses. Units / hour = units picked ÷ active time.</p>
     </div>
     <div class="detail" id="detail" hidden></div>
   </section>
@@ -188,6 +192,7 @@ setInterval(() => { if (!$("ordersTab").hidden && !sel.size && $("modal").hidden
 // ---------------- carts ----------------
 const SC = { in_progress: ["Picking", "var(--blue)"], assigned: ["Assigned", "var(--amber)"], draft: ["Ready to pick", "var(--green)"], completed: ["Picked", "var(--ink)"] };
 async function loadCarts() {
+  loadRates();
   const { data: d, error } = await sb.rpc("wms_carts_overview");
   if (error) { await check(error); $("carts").innerHTML = `<p class="bad">${esc(error.message)}</p>`; return; }
   const open = d.filter((c) => c.status !== "completed");
@@ -201,6 +206,15 @@ async function loadCarts() {
     : `<p class="panel">No carts yet. Build some from the Orders tab.</p>`;
 }
 $("refreshCarts").onclick = loadCarts;
+async function loadRates() {
+  const { data: r, error } = await sb.rpc("wms_pick_rates");
+  if (error) { $("rates").innerHTML = `<tr><td colspan="7" class="bad">${esc(error.message)}</td></tr>`; return; }
+  const hm = (m) => `${Math.floor(m / 60)}h ${String(Math.round(m % 60)).padStart(2, "0")}m`;
+  $("rates").innerHTML = r.length ? r.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td class="num">${fmt(x.units)}</td><td class="num">${x.carts}</td>
+    <td class="num">${hm(x.active_minutes)}</td><td class="num"><b>${x.units_per_hour ?? "-"}</b></td>
+    <td class="num ${x.missing ? "bad" : ""}">${x.missing}</td><td class="num ${x.unscanned ? "warn" : ""}">${x.unscanned}</td></tr>`).join("")
+    : `<tr><td colspan="7">No picking yet today.</td></tr>`;
+}
 $("carts").addEventListener("click", (e) => { const c = e.target.closest("[data-s]"); if (c) openCart(c.dataset.s); });
 
 async function openCart(id) {

@@ -45,6 +45,8 @@
   .choose button{min-height:52px;text-align:left;font-size:18px}
   .flags{margin-top:10px;padding:14px 16px;background:#fbeaea;border-left:8px solid var(--red);color:var(--red)}
   .flags h3{color:var(--red);font-size:18px;margin-bottom:6px}
+  .flags.amberflag{background:#fbf3e3;border-left-color:var(--amber);color:#6b4a10}
+  .flags.amberflag h3{color:#6b4a10} .flags.amberflag li{color:#4a3208}
   .flags li{margin-left:18px;font-weight:700;color:#5a1010}
   .flags .note{color:#6b4a10;font-weight:700}
   .flags .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
@@ -249,18 +251,24 @@ function render(v) {
   $("ocount").textContent = `${v.units_packed ?? 0} / ${v.units_total ?? 0}`;
   $("ometa").textContent = [v.order.customer, [v.order.city, v.order.state, v.order.country].filter(Boolean).join(" "), v.order.requested_service].filter(Boolean).join(" · ");
   const fl = v.pick_flags ?? [], missing = fl.filter((f) => f.kind === "missing"), unscanned = fl.filter((f) => f.kind !== "missing");
-  $("flags").innerHTML = fl.length ? `<div class="flags">
-      <h3>${missing.length ? "⚠ The picker could not pick everything on this order" : "⚠ The picker picked some items without scanning"}</h3>
-      <ul>${fl.map((f) => `<li>${f.qty} × ${esc(f.sku)} · ${f.kind === "missing" ? "MISSING" : "picked without scan"}: ${esc(FLAG[f.reason] ?? f.reason)}${f.bin ? ` (at ${esc(f.bin)})` : ""}${f.picker ? ` · ${esc(f.picker)}` : ""}${f.note ? ` · "${esc(f.note)}"` : ""}</li>`).join("")}</ul>
-      ${missing.length ? `<div class="note">Check the cart and the tote. If the item really is missing, put this order on hold.</div>` : `<div class="note">Check these items carefully against the order before you scan them.</div>`}
+  const flagLine = (f) => `<li>${f.qty} × ${esc(f.sku)} · ${esc(FLAG[f.reason] ?? f.reason)}${f.bin ? ` (at ${esc(f.bin)})` : ""}${f.picker ? ` · ${esc(f.picker)}` : ""}${f.note ? ` · "${esc(f.note)}"` : ""}</li>`;
+  $("flags").innerHTML = (missing.length ? `<div class="flags">
+      <h3>⚠ MISSING ITEM: the picker could not pick ${missing.reduce((a, f) => a + f.qty, 0)} item(s)</h3>
+      <ul>${missing.map(flagLine).join("")}</ul>
+      <div class="note">It should NOT be in the tote. Check the cart and tote. If it really is missing, put the order on hold.</div>
       ${v.order.is_held ? `<div class="row"><span class="chip amber">ON HOLD: ${esc(v.order.hold_reason ?? "")}</span></div>`
-        : missing.length ? `<div class="row"><button class="ghost" id="holdbtn" style="color:var(--red);border-color:var(--red)">Put order on hold (missing item)</button></div>` : ""}
-    </div>` : "";
+        : `<div class="row"><button class="ghost" id="holdbtn" style="color:var(--red);border-color:var(--red)">Put order on hold (missing item)</button></div>`}
+    </div>` : "")
+    + (unscanned.length ? `<div class="flags amberflag">
+      <h3>⚠ CHECK: ${unscanned.reduce((a, f) => a + f.qty, 0)} item(s) were picked WITHOUT a scan</h3>
+      <ul>${unscanned.map(flagLine).join("")}</ul>
+      <div class="note">It should be in the tote. Check it is exactly the right product, size and colour. If its barcode won't scan here either, use "Can't scan? Pass manually".</div>
+    </div>` : "");
   $("holdbtn")?.addEventListener("click", holdOrder);
   $("lines").innerHTML = (v.lines ?? []).map((l) => `<div class="line ${l.remaining === 0 ? "done" : ""}" data-sku="${esc(l.sku)}">
       ${l.image_url ? `<img src="${esc(l.image_url + (l.image_url.includes("?") ? "&" : "?") + "width=128")}" alt="">` : `<div class="noimg"></div>`}
       <div><div><b>${esc(l.name)}</b> ${l.variant ? `<span class="mono">${esc(l.variant)}</span>` : ""}</div><div class="sku">${esc(l.sku)}</div>
-        ${(l.pick_flag ?? []).map((f) => `<span class="lineflag ${f.kind === "missing" ? "" : "amber"}">${f.kind === "missing" ? `PICKER: ${f.qty} MISSING` : `PICKER: ${f.qty} NOT SCANNED`} · ${esc(FLAG[f.reason] ?? f.reason)}</span>`).join(" ")}
+        ${(l.pick_flag ?? []).map((f) => `<span class="lineflag ${f.kind === "missing" ? "" : "amber"}">${f.kind === "missing" ? `MISSING ${f.qty}: NOT IN TOTE` : `${f.qty} PICKED WITHOUT SCAN: CHECK IT`} · ${esc(FLAG[f.reason] ?? f.reason)}</span>`).join(" ")}
         ${v.status === "packing" && l.remaining > 0 ? `<button class="ghost passbtn" data-pass="${esc(l.order_line_id)}">Can't scan? Pass manually</button>` : ""}</div>
       <div class="q">${l.qty_packed}/${l.qty_ordered}</div></div>`).join("");
   refreshShip();
@@ -272,7 +280,7 @@ function refreshShip() {
 }
 
 const FLAG = { not_in_location: "Not in location", damaged_stock: "Damaged stock", not_enough: "Not enough in location",
-  no_barcode: "No barcode", barcode_wont_scan: "Barcode wouldn't scan", other: "Other" };
+  no_barcode: "No barcode", barcode_wont_scan: "Barcode wouldn't scan / label damaged", other: "Other" };
 async function holdOrder() {
   const missing = (view.pick_flags ?? []).filter((f) => f.kind === "missing").map((f) => `${f.qty} x ${f.sku}`).join(", ");
   if (!(await ask("Put on hold?", `#${view.order.order_number} goes on hold as a missing item order (${missing}). Put the box and items aside for a supervisor.`, "Put on hold"))) return;
@@ -324,7 +332,8 @@ async function startOrder(code, override = false) {
   const warn = (data.warnings ?? []).find((w) => w.type === "ORDER_ON_HOLD");
   const flagged = (data.pick_flags ?? []).length;
   if (flagged) bad();
-  say(warn ? `ON HOLD (packing anyway): ${warn.reason ?? ""}` : flagged ? "Read the picker's warning below before packing." : data.complete ? "All items scanned. Put the box on the scale." : "Scan each item.", warn || flagged ? "warn" : "");
+  const anyMissing = (data.pick_flags ?? []).some((f) => f.kind === "missing");
+  say(warn ? `ON HOLD (packing anyway): ${warn.reason ?? ""}` : flagged ? (anyMissing ? "MISSING ITEM on this order. Read the warning below." : "Some items were picked without a scan. Check them below.") : data.complete ? "All items scanned. Put the box on the scale." : "Scan each item.", warn || flagged ? "warn" : "");
 }
 
 async function scanItem(code) {

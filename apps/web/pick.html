@@ -184,31 +184,51 @@ function qtyBox(t, barcode, left) {
   draw(); $("modal").hidden = false;
 }
 
-// can't pick: reason + warning + confirm
+// can't pick: two paths
+//   MISSING / DAMAGED  -> nothing goes in the tote, packer alerted (missing item)
+//   HERE, WON'T SCAN   -> item goes in the tote unscanned, packer told to check it
 function cantPickBox(t) {
   const left = t.qty_required - t.qty_picked;
-  let reason = "", qty = left;
-  const R = [["not_in_location","Not in location","missing"],["damaged_stock","Damaged stock","missing"],["not_enough","Not enough in location","missing"],
-             ["no_barcode","No barcode (item is in my hand)","have"],["barcode_wont_scan","Barcode won't scan (item is in my hand)","have"],["other","Other (write a note)","missing"]];
-  const draw = () => { const have = R.find((r) => r[0] === reason)?.[2] === "have";
+  let path = "", reason = "", qty = left;
+  const MISSING = [["not_in_location", "Not in the location"], ["not_enough", "Not enough in the location"], ["damaged_stock", "Damaged (can't be sent)"], ["other", "Other (write a note)"]];
+  const NOSCAN  = [["no_barcode", "No barcode on the item"], ["barcode_wont_scan", "Barcode won't scan / label damaged"], ["wrong_barcode", "Barcode scans as a different product"]];
+  const draw = () => {
+    const missing = path === "missing";
     $("mpanel").innerHTML = `<h2>Can't pick ${esc(t.sku)}?</h2>
     <div class="redwarn">Only use this if you genuinely cannot scan or find the item. Every override is recorded against your name and checked at packing. Incorrect overrides may result in disciplinary action.</div>
-    <div class="opts">${R.map(([k, l]) => `<button data-r="${k}" class="${k === reason ? "on" : ""}">${l}</button>`).join("")}</div>
-    ${reason === "other" ? `<input id="note" placeholder="What happened?" style="font-size:18px">` : ""}
-    ${reason && !have ? `<div class="msg warn">${left > 1 ? `If you found some, cancel and scan those first. ` : ""}${left} will be marked MISSING and the packer will be told.</div>` : ""}
-    ${have ? `<div class="msg">${left} will be picked without scanning. The packer will check it.</div>` : ""}
-    ${reason ? `<label class="check"><input type="checkbox" id="ok"><span>${have ? "I have checked the item in my hand. It is exactly this product, size and colour." : "I have checked the location and the item is not there / not usable."}</span></label>` : ""}
-    <div class="btns"><button class="ghost" id="xno">Cancel</button><button id="xyes" style="background:var(--red);border-color:var(--red)" disabled>Confirm</button></div>`;
-    const valid = () => { $("xyes").disabled = !(reason && $("ok")?.checked && (reason !== "other" || $("note")?.value.trim())); };
+    ${!path ? `<div class="step">What's the problem?</div>
+      <div class="opts">
+        <button data-p="missing" style="border-color:var(--red)"><b style="color:var(--red)">The item is missing or damaged</b><br><span class="mono">Nothing goes in the tote · the packer is alerted</span></button>
+        <button data-p="noscan" style="border-color:var(--amber)"><b style="color:#6b4a10">The item is here, but won't scan</b><br><span class="mono">It goes in the tote · the packer checks it</span></button>
+      </div>`
+    : `<div class="msg ${missing ? "bad" : "warn"}" style="font-size:17px">${missing ? "MISSING OR DAMAGED" : "HERE, BUT WON'T SCAN"} <button class="ghost" id="chg" style="min-height:34px;font-size:13px;margin-left:8px">Change</button></div>
+      <div class="step">Why?</div>
+      <div class="opts">${(missing ? MISSING : NOSCAN).map(([k, l]) => `<button data-r="${k}" class="${k === reason ? "on" : ""}">${l}</button>`).join("")}</div>
+      ${reason === "other" || reason === "wrong_barcode" ? `<input id="note" placeholder="${reason === "other" ? "What happened?" : "What did it scan as? (optional)"}" style="font-size:18px">` : ""}
+      ${!missing && left > 1 ? `<div class="qtyrow" style="align-items:center"><div class="step">How many are in your hand?</div>
+          <div style="display:flex;gap:8px;align-items:center"><button class="ghost" id="qm" style="min-height:52px;width:60px;font-size:24px">−</button>
+          <div class="qtyshow" style="font-size:40px;min-width:60px" id="qv">${qty}</div><button class="ghost" id="qp" style="min-height:52px;width:60px;font-size:24px">+</button></div></div>` : ""}
+      ${reason ? (missing
+        ? `<div class="msg bad">${left > 1 ? "If you found some, cancel and scan those first. " : ""}${left} × ${esc(t.sku)} will be marked MISSING. The packer will be alerted and can put the order on hold.</div>`
+        : `<div class="msg warn">${qty} × ${esc(t.sku)} go in the tote without a scan. The packer will be told to check ${qty > 1 ? "them" : "it"}.${qty < left ? ` The other ${left - qty} stay on this stop.` : ""}</div>`) : ""}
+      ${reason ? `<label class="check"><input type="checkbox" id="ok"><span>${missing ? "I have checked the location. The item is not there, or it is not good enough to send." : "I have checked the item in my hand. It is exactly this product, size and colour."}</span></label>` : ""}`}
+    <div class="btns"><button class="ghost" id="xno">Cancel</button><button id="xyes" style="background:${missing ? "var(--red)" : "var(--amber)"};border-color:${missing ? "var(--red)" : "var(--amber)"};color:${missing ? "#fff" : "#111"}" disabled>${missing ? "Mark missing" : "Put in tote unscanned"}</button></div>`;
+    const valid = () => { const b = $("xyes"); if (b) b.disabled = !(path && reason && $("ok")?.checked && (reason !== "other" || $("note")?.value.trim())); };
+    $("mpanel").querySelectorAll("[data-p]").forEach((b) => b.onclick = () => { path = b.dataset.p; reason = ""; draw(); });
     $("mpanel").querySelectorAll("[data-r]").forEach((b) => b.onclick = () => { reason = b.dataset.r; draw(); });
+    $("chg")?.addEventListener("click", () => { path = ""; reason = ""; draw(); });
+    $("qm")?.addEventListener("click", () => { qty = Math.max(1, qty - 1); draw(); });
+    $("qp")?.addEventListener("click", () => { qty = Math.min(left, qty + 1); draw(); });
     $("ok")?.addEventListener("change", valid); $("note")?.addEventListener("input", valid);
     $("xno").onclick = () => { $("modal").hidden = true; };
     $("xyes").onclick = async () => { $("xyes").disabled = true;
-      try { const r = await rpc("wms_pick_exception", { p_task_id: t.id, p_reason: reason, p_confirmed: true, p_qty: qty, p_note: $("note")?.value.trim() || null });
+      const apiReason = reason === "wrong_barcode" ? "barcode_wont_scan" : reason;
+      const note = reason === "wrong_barcode" ? `Barcode scans as a different product${$("note")?.value.trim() ? ": " + $("note").value.trim() : ""}` : ($("note")?.value.trim() || null);
+      try { const r = await rpc("wms_pick_exception", { p_task_id: t.id, p_reason: apiReason, p_confirmed: true, p_qty: missing ? left : qty, p_note: note });
         $("modal").hidden = true;
         if (!r.ok) { bad(); return msg(r.error, "bad"); }
-        tone(600, 120); binOk = false; state = r; route();
-        msg(r.kind === "missing" ? `${r.qty} × ${t.sku} marked missing. The packer will see it.` : `${r.qty} × ${t.sku} picked without scan (recorded).`, "warn");
+        tone(600, 120); binOk = r.current?.task?.id === t.id; state = r; route();
+        msg(r.kind === "missing" ? `${r.qty} × ${t.sku} marked MISSING. The packer will be alerted.` : `${r.qty} × ${t.sku} in the tote unscanned. The packer will check it.`, r.kind === "missing" ? "bad" : "warn");
       } catch (e) { $("modal").hidden = true; bad(); msg(e.message, "bad"); } };
     valid(); };
   draw(); $("modal").hidden = false;

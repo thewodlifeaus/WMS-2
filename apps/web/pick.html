@@ -102,17 +102,23 @@ function toteScreen() {
   const shared = next.includes(",");
   app.innerHTML = `<div class="step">Set up ${esc(state.cart)} · tote ${n} of ${total}</div>
     <div class="card"><div class="step">Scan an empty tote for ${shared ? "these orders (they share one tote)" : "order"}</div><div class="big" style="${shared ? "font-size:34px" : ""}">${esc(next)}</div></div>
-    <div id="msg" class="msg">Scan the tote barcode, then put the tote on the cart.</div>
+    <div class="typebox"><input id="typetote" placeholder="or type the tote number, eg 412 or 001" inputmode="numeric" autocomplete="off"><button id="gotote">Add tote</button></div>
+    <div id="msg" class="msg">Scan the tote barcode (or type its number), then put the tote on the cart.</div>
     ${state.totes.length ? `<div class="totes">${state.totes.map((t) => `<span class="tote">${esc(t.tote)}<small>${esc(t.orders)}</small></span>`).join("")}</div>` : ""}
     <div class="btns"><button class="ghost" id="pause">Pause</button><span></span></div>`;
   $("pause").onclick = pauseBox;
-  onScan = async (v) => {
+  const addTote = async (v) => {
     try {
       const r = await rpc("wms_assign_totes", { p_session_id: state.session_id, p_tote_barcodes: [v] });
-      if (!r.ok) { bad(); return msg({ UNKNOWN_TOTE: `${v} is not a tote.`, TOTE_IN_USE: `Tote ${v} is already in use. Use another tote.` }[r.error] ?? r.error, "bad"); }
+      if (!r.ok) { bad(); return msg({ UNKNOWN_TOTE: `"${v}" is not a tote. Check the number on the tote.`, TOTE_IN_USE: `Tote ${r.tote ?? v} is already in use. Use another tote.` }[r.error] ?? r.error, "bad"); }
       good(); await refresh();
+      const t = r.assigned?.[0]; if (t) msg(`✓ ${t.tote} for #${t.orders.replace(/, /g, ", #")}.`, "good");
     } catch (e) { bad(); msg(e.message, "bad"); }
   };
+  onScan = addTote;
+  const typed = () => { const v = $("typetote").value.trim(); if (v) { $("typetote").value = ""; addTote(v); } };
+  $("gotote").onclick = typed;
+  $("typetote").addEventListener("keydown", (e) => { if (e.key === "Enter") typed(); });
 }
 
 // ===================== PICK: location -> product =====================

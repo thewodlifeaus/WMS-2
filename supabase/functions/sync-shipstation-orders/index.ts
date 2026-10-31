@@ -32,23 +32,40 @@ async function page(status: string, since: string, n: number) {
   return await r.json() as { shipments: SsShipment[]; pages: number };
 }
 
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
+};
+const reply = (b: unknown, status = 200) =>
+  new Response(JSON.stringify(b), { status, headers: { ...cors, "Content-Type": "application/json" } });
+
 Deno.serve(async (req) => {
-  // only pg_cron (or an admin with the cron secret) may run this
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  // pg_cron (cron secret) or a signed-in admin/supervisor ("Pull orders now" button)
   const { data: sec } = await db.from("app_secrets").select("value").eq("name", "cron_secret").single();
-  if (!sec?.value || req.headers.get("x-cron-secret") !== sec.value) return Response.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
+  let allowed = !!sec?.value && req.headers.get("x-cron-secret") === sec.value;
+  if (!allowed) {
+    const jwt = req.headers.get("Authorization")?.replace("Bearer ", "") ?? "";
+    const { data: auth } = await db.auth.getUser(jwt);
+    if (auth?.user) {
+      const { data: st } = await db.from("staff").select("role").eq("id", auth.user.id).eq("is_active", true).maybeSingle();
+      allowed = st?.role === "admin" || st?.role === "supervisor";
+    }
+  }
+  if (!allowed) return reply({ ok: false, error: "FORBIDDEN" }, 403);
   const body = await req.json().catch(() => ({}));
 
   // check mode: prove the API key works and count what is waiting, write nothing
   if (body.check) {
     const q = new URLSearchParams({ shipment_status: "pending", page_size: "100", sort_by: "created_at", sort_dir: "desc" });
     const r = await fetch(`${SS}/shipments?${q}`, { headers: hdr });
-    if (!r.ok) return Response.json({ ok: false, status: r.status, error: (await r.text()).slice(0, 300) });
+    if (!r.ok) return reply({ ok: false, status: r.status, error: (await r.text()).slice(0, 300) });
     const j = await r.json() as { shipments: (SsShipment & { store_id?: string })[]; total: number; pages: number };
     const byStore: Record<string, number> = {};
     for (const s of j.shipments) byStore[s.store_id ?? "none"] = (byStore[s.store_id ?? "none"] ?? 0) + 1;
     const skus = [...new Set(j.shipments.flatMap((s) => s.items.map((i) => i.sku).filter(Boolean)))] as string[];
     const { data: known } = await db.from("products").select("sku").in("sku", skus);
-    return Response.json({ ok: true, pending_total: j.total, pages: j.pages, first_page_by_store: byStore,
+    return reply({ ok: true, pending_total: j.total, pages: j.pages, first_page_by_store: byStore,
       newest: j.shipments[0]?.created_at, oldest_on_page: j.shipments.at(-1)?.created_at,
       first_page_skus: skus.length, skus_known_to_wms: known?.length ?? 0,
       unknown_sample: skus.filter((k) => !(known ?? []).some((p) => p.sku === k)).slice(0, 10) });
@@ -62,7 +79,7 @@ Deno.serve(async (req) => {
   // everything imported is still pending, so older label/cancel events can't affect it
   const sinceEvents = state?.cursor ?? new Date(Date.now() - 3600e3).toISOString();
   const started = Date.now();
-  let newest = since, imported = 0, cancelled = 0, unknownSkus = new Set<string>();
+  let newest = since, imported = 0, updated = 0, cancelled = 0, unknownSkus = new Set<string>();
 
   try {
     // ---- pending -> import -------------------------------------------------
@@ -72,7 +89,18 @@ Deno.serve(async (req) => {
       for (const s of res.shipments) {
         if (s.modified_at > newest) newest = s.modified_at;
         const { data: existing } = await db.from("orders").select("id,status").eq("shipstation_shipment_id", s.shipment_id).maybeSingle();
-        if (existing) continue; // already imported; WMS owns it from here
+        if (existing) {
+          // changed in ShipStation before it went on a cart (eg service or address fixed): take the new details
+          if (["awaiting_pick", "on_hold"].includes(existing.status)) {
+            await db.from("orders").update({
+              requested_service: s.requested_shipment_service, carrier_id: s.carrier_id, service_code: s.service_code,
+              ship_by: s.ship_by_date?.slice(0, 10) ?? null, ship_to: s.ship_to, customer_name: s.ship_to?.name,
+              priority: /express/i.test(s.requested_shipment_service ?? "") ? 50 : 100, raw: s,
+            }).eq("id", existing.id);
+            updated++;
+          }
+          continue;
+        }
 
         const lines = s.items.filter((i) => i.sku && i.quantity > 0);
         if (!lines.length) continue;
@@ -149,10 +177,10 @@ Deno.serve(async (req) => {
     const done = new Date(started - 120e3).toISOString();
     await db.from("sync_state").upsert({ system: "shipstation_orders", cursor: !cut && done > newest ? done : newest,
       last_run_at: new Date().toISOString(), last_ok_at: new Date().toISOString(), last_error: null });
-    return Response.json({ ok: true, imported, cancelled, shipped_elsewhere: shippedElsewhere, unknown_skus: [...unknownSkus] });
+    return reply({ ok: true, imported, updated, cancelled, shipped_elsewhere: shippedElsewhere, unknown_skus: [...unknownSkus] });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await db.from("sync_state").upsert({ system: "shipstation_orders", last_run_at: new Date().toISOString(), last_error: msg });
-    return Response.json({ ok: false, error: msg }, { status: 500 });
+    return reply({ ok: false, error: msg }, 500);
   }
 });

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orders and carts · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  .wrap{max-width:1500px}
+  .tabs{display:flex;gap:0;border-bottom:2px solid var(--ink);margin:8px 0 12px}
+  .tabs button{background:transparent;color:var(--ink);border:0;border-bottom:4px solid transparent;margin-bottom:-2px;font-size:16px}
+  .tabs button.on{border-bottom-color:var(--orange)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .chipbtn{display:flex;gap:10px;align-items:center;min-height:44px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--rule);font-weight:800}
+  .chipbtn b{font:600 20px "IBM Plex Mono",monospace}
+  .chipbtn.on{border:2px solid var(--ink)}
+  .chipbtn .dot{width:10px;height:10px;border-radius:50%}
+  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:10px}
+  .toolbar label{display:grid;gap:4px}
+  .toolbar input{min-height:40px}
+  .build{position:sticky;bottom:0;background:var(--ink);color:#fff;padding:12px 16px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:12px;z-index:5}
+  .build input{width:80px;min-height:40px}
+  .build .mono{color:#ccc}
+  .build button{min-height:40px}
+  table input[type=checkbox]{width:20px;min-height:20px}
+  td{font-size:14px} tr.sel td{background:#eef1f8}
+  .tag{display:inline-block;font:600 10px "IBM Plex Mono",monospace;padding:2px 5px;border:1px solid var(--rule);margin:1px;background:var(--panel)}
+  .ok{color:var(--green);font-weight:800} .bad{color:var(--red);font-weight:800} .warn{color:var(--amber);font-weight:800}
+  .carts{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+  .card{background:var(--surface);border:1px solid var(--rule);padding:12px;cursor:pointer;display:grid;gap:6px}
+  .card:hover{border-color:var(--ink)}
+  .card h3{font-size:22px;display:flex;justify-content:space-between;align-items:center}
+  .bar2{height:8px;background:var(--panel);border:1px solid var(--rule)} .bar2 i{display:block;height:100%;background:var(--green)}
+  .detail{margin-top:12px}
+  .picks img{width:44px;height:44px;object-fit:cover;background:var(--panel)}
+  .bin{font:600 15px "IBM Plex Mono",monospace;color:var(--ink)}
+  .split{font:500 12px "IBM Plex Mono",monospace;color:var(--muted)}
+  .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
+  .modal .panel{max-width:640px;width:100%;max-height:85vh;overflow:auto}
+  .last{font-size:13px}
+  @media print{.bar,.tabs,#ordersTab,.cardsWrap,.noprint{display:none!important}.detail{margin:0}body{background:#fff}}
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc">ORDERS AND CARTS</span><button class="ghost" id="out">Sign out</button></div>
+<main class="wrap">
+  <div class="tabs"><button id="t1" class="on">Orders</button><button id="t2">Carts</button></div>
+
+  <section id="ordersTab">
+    <div class="toolbar">
+      <div class="chips" id="chips" style="margin:0"></div>
+      <span style="flex:1"></span>
+      <label><span class="mono">Search</span><input id="q" placeholder="Order #, name, service or SKU"></label>
+      <div style="display:grid;gap:4px"><span class="mono last" id="last"></span><button id="pull" class="ghost" hidden>Pull orders from ShipStation</button></div>
+    </div>
+    <div id="err" class="err"></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th><input type="checkbox" id="all" title="Select all shown"></th><th>Order</th><th>Customer</th><th class="hide-sm">Ship to</th>
+        <th>Shipping service</th><th class="hide-sm">Tags</th><th class="num">Units</th><th>Stock</th><th class="hide-sm">Ordered</th><th>Status</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="10" class="mono">Loading…</td></tr></tbody>
+    </table></div>
+    <div class="build" id="build" hidden>
+      <span><b id="selcount">0</b> <span class="mono">ORDERS SELECTED</span></span>
+      <label class="mono">Select first <input id="firstn" inputmode="numeric" value="60"></label><button class="ghost" id="pickfirst" style="color:#fff;border-color:#fff">Select</button>
+      <label class="mono">Orders per cart <input id="per" inputmode="numeric" value="12"></label>
+      <span class="mono" id="cartinfo"></span>
+      <span style="flex:1"></span>
+      <button class="signal" id="buildbtn" disabled>Build carts</button>
+    </div>
+  </section>
+
+  <section id="cartsTab" hidden>
+    <div class="cardsWrap">
+      <div class="toolbar"><span class="mono" id="cartsum"></span><span style="flex:1"></span><button class="ghost" id="refreshCarts">Refresh</button></div>
+      <div class="carts" id="carts"></div>
+    </div>
+    <div class="detail" id="detail" hidden></div>
+  </section>
+  <p class="foot noprint">TRAIN<br>WITHOUT<br>LIMITS.</p>
+</main>
+
+<div class="modal" id="modal" hidden><div class="panel"><div id="mbody"></div><div style="margin-top:12px;text-align:right"><button id="mclose">Close</button></div></div></div>
+
+<script type="module">
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=3";
+const me = await requireLogin();
+if (me?.role === "display") location.href = "/tv.html";
+const boss = ["admin", "supervisor"].includes(me?.role);
+const $ = (id) => document.getElementById(id);
+$("out").onclick = signOut;
+$("pull").hidden = !boss;
+const tab = (n) => { $("t1").classList.toggle("on", n === 1); $("t2").classList.toggle("on", n === 2);
+  $("ordersTab").hidden = n !== 1; $("cartsTab").hidden = n !== 2; if (n === 2) loadCarts(); };
+$("t1").onclick = () => tab(1); $("t2").onclick = () => tab(2);
+function modal(html) { $("mbody").innerHTML = html; $("modal").hidden = false; }
+$("mclose").onclick = () => { $("modal").hidden = true; };
+async function check(error) { if (error && /NOT_STAFF|JWT/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/orders.html"; } }
+const ago = (t) => { if (!t) return "-"; const h = (Date.now() - new Date(t)) / 36e5; return h < 1 ? `${Math.round(h * 60)}m` : h < 48 ? `${Math.round(h)}h` : `${Math.round(h / 24)}d`; };
+
+// ---------------- orders ----------------
+const VIEWS = [["ready","Ready to cart","var(--green)"],["no_service","No shipping service","var(--red)"],["on_hold","On hold","var(--amber)"],["in_progress","On a cart / packing","var(--blue)"],["all","All open",""]];
+let view = "ready", data = null, sel = new Set(), timer;
+async function loadOrders() {
+  const { data: d, error } = await sb.rpc("wms_order_queue", { p_view: view, p_search: $("q").value.trim() || null });
+  if (error) { await check(error); $("err").textContent = error.message; return; }
+  data = d; $("err").textContent = "";
+  const s = d.summary;
+  $("chips").innerHTML = VIEWS.map(([k, label, col]) => `<button class="chipbtn ${k === view ? "on" : ""}" data-view="${k}">
+      ${col ? `<span class="dot" style="background:${col}"></span>` : ""}${label} <b>${fmt(k === "all" ? s.ready + s.no_service + s.on_hold + s.in_progress : s[k])}</b></button>`).join("")
+    + (s.no_stock ? `<span class="chipbtn" style="cursor:default"><span class="dot" style="background:var(--red)"></span>Ready but short of stock <b>${fmt(s.no_stock)}</b></span>` : "");
+  for (const id of [...sel]) if (!d.orders.some((o) => o.id === id && o.ready === "ready")) sel.delete(id);
+  $("rows").innerHTML = d.orders.length ? d.orders.map(row).join("") : `<tr><td colspan="10">No orders here.</td></tr>`;
+  $("build").hidden = !(boss && view === "ready");
+  $("all").disabled = !(boss && view === "ready");
+  updateSel();
+  const st = await sb.from("sync_state").select("last_ok_at,last_error").eq("system", "shipstation_orders").maybeSingle();
+  $("last").textContent = st.data ? `LAST SHIPSTATION PULL ${new Date(st.data.last_ok_at).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })} · AUTO EVERY 5 MIN` : "";
+}
+function row(o) {
+  const can = boss && o.ready === "ready";
+  const status = o.ready === "ready" ? `<span class="ok">Ready</span>`
+    : o.ready === "no_service" ? `<span class="bad">No service in ShipStation</span>`
+    : o.ready === "on_hold" ? `<span class="warn">On hold</span>${o.hold_reason ? `<div class="split">${esc(o.hold_reason)}</div>` : ""}`
+    : `<span>${esc(o.on_cart ? `On ${o.on_cart}` : o.status.replace("_", " "))}</span>`;
+  return `<tr class="${sel.has(o.id) ? "sel" : ""}">
+    <td>${can ? `<input type="checkbox" data-id="${o.id}" ${sel.has(o.id) ? "checked" : ""}>` : ""}</td>
+    <td><b>#${esc(o.order_number)}</b>${o.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}</td>
+    <td>${esc(o.customer ?? "")}</td>
+    <td class="hide-sm">${esc([o.city, o.state, o.country !== "AU" ? o.country : ""].filter(Boolean).join(" "))}</td>
+    <td>${esc(o.service ?? "")}${o.service_code ? `<div class="split">${esc(o.service_code)}</div>` : ""}</td>
+    <td class="hide-sm">${(o.tags ?? []).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</td>
+    <td class="num">${fmt(o.units)}<div class="split">${o.lines} line${o.lines === 1 ? "" : "s"}</div></td>
+    <td>${o.stock_ok ? `<span class="ok">✓</span>` : `<span class="bad">Short</span>`}</td>
+    <td class="hide-sm">${ago(o.ordered_at)}</td>
+    <td>${status}</td></tr>`;
+}
+$("chips").addEventListener("click", (e) => { const b = e.target.closest("[data-view]"); if (!b) return; view = b.dataset.view; sel.clear(); loadOrders(); });
+$("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(loadOrders, 300); });
+$("rows").addEventListener("change", (e) => { const c = e.target.closest("input[data-id]"); if (!c) return;
+  c.checked ? sel.add(c.dataset.id) : sel.delete(c.dataset.id); c.closest("tr").classList.toggle("sel", c.checked); updateSel(); });
+$("all").addEventListener("change", () => { for (const o of data.orders) if (o.ready === "ready") $("all").checked ? sel.add(o.id) : sel.delete(o.id); loadOrdersRender(); });
+$("pickfirst").onclick = () => { sel.clear(); const n = Number($("firstn").value) || 0;
+  for (const o of data.orders.filter((x) => x.ready === "ready" && x.stock_ok).slice(0, n)) sel.add(o.id); loadOrdersRender(); };
+function loadOrdersRender() { $("rows").innerHTML = data.orders.map(row).join(""); updateSel(); }
+function updateSel() {
+  $("selcount").textContent = sel.size;
+  const per = Math.max(1, Number($("per").value) || 12);
+  const need = Math.ceil(sel.size / per);
+  $("cartinfo").textContent = sel.size ? `= ${need} CART${need === 1 ? "" : "S"} · ${data?.free_carts ?? 0} FREE` : `${data?.free_carts ?? 0} CARTS FREE`;
+  $("buildbtn").disabled = !sel.size || need > (data?.free_carts ?? 0);
+}
+$("per").addEventListener("input", updateSel);
+
+$("buildbtn").onclick = async () => {
+  const per = Math.max(1, Number($("per").value) || 12);
+  if (!confirm(`Build carts from ${sel.size} orders, ${per} per cart?\nExpress orders go first, then oldest.`)) return;
+  $("buildbtn").disabled = true; $("buildbtn").textContent = "Building…";
+  const { data: r, error } = await sb.rpc("wms_build_carts", { p_order_ids: [...sel], p_per_cart: per });
+  $("buildbtn").textContent = "Build carts";
+  if (error) { await check(error); modal(`<h2>Could not build carts</h2><p class="bad">${esc(error.message)}</p>`); return loadOrders(); }
+  sel.clear();
+  const ERR = { NO_READY_ORDERS: "None of those orders are ready.", NO_FREE_CARTS: "All carts are in use." };
+  modal(`<h2>${r.ok ? `${r.carts.length} cart${r.carts.length === 1 ? "" : "s"} built` : "No carts built"}</h2>
+    ${r.error ? `<p class="bad">${esc(ERR[r.error] ?? r.error)}</p>` : ""}
+    ${(r.carts ?? []).length ? `<table style="margin-top:8px"><tr><th>Cart</th><th class="num">Orders</th><th class="num">Stops</th><th>Short of stock</th></tr>
+      ${r.carts.map((c) => `<tr><td><b>${esc(c.cart)}</b></td><td class="num">${c.orders}</td><td class="num">${c.stops}</td>
+        <td>${(c.shortages ?? []).map((s) => `<span class="tag">${esc(s.sku)} ×${s.short}</span>`).join("") || "-"}</td></tr>`).join("")}</table>` : ""}
+    ${(r.failed ?? []).length ? `<p class="bad" style="margin-top:8px">Not built: ${r.failed.map((f) => `${esc(f.cart)} (${esc(f.error)})`).join("; ")}</p>` : ""}
+    ${(r.skipped ?? []).length ? `<p class="warn" style="margin-top:8px">Skipped ${r.skipped.length}: ${r.skipped.map((s) => `#${esc(s.order_number)} (${esc(s.reason.replace("_", " "))})`).join(", ")}</p>` : ""}
+    ${r.left_over ? `<p class="warn" style="margin-top:8px">${r.left_over} orders left over (not enough free carts).</p>` : ""}
+    <p class="mono" style="margin-top:10px">Pickers scan the cart, then one tote per order, to start.</p>`);
+  loadOrders();
+};
+
+$("pull").onclick = async () => {
+  $("pull").disabled = true; $("pull").textContent = "Pulling…";
+  const { data: r, error } = await sb.functions.invoke("sync-shipstation-orders", { body: {} });
+  $("pull").disabled = false; $("pull").textContent = "Pull orders from ShipStation";
+  if (error || !r?.ok) { let m = error?.message ?? r?.error; try { m = (await error.context.json()).error ?? m; } catch {} modal(`<h2>Pull failed</h2><p class="bad">${esc(m)}</p>`); return; }
+  modal(`<h2>ShipStation orders pulled</h2><p><b>${r.imported}</b> new · <b>${r.updated ?? 0}</b> updated · <b>${r.cancelled}</b> cancelled · <b>${r.shipped_elsewhere}</b> shipped outside the WMS</p>
+    ${(r.unknown_skus ?? []).length ? `<p class="bad">Unknown SKUs (orders held): ${r.unknown_skus.map(esc).join(", ")}</p>` : ""}`);
+  loadOrders();
+};
+loadOrders();
+setInterval(() => { if (!$("ordersTab").hidden && !sel.size && $("modal").hidden) loadOrders(); }, 60000);
+
+// ---------------- carts ----------------
+const SC = { in_progress: ["Picking", "var(--blue)"], assigned: ["Assigned", "var(--amber)"], draft: ["Ready to pick", "var(--green)"], completed: ["Picked", "var(--ink)"] };
+async function loadCarts() {
+  const { data: d, error } = await sb.rpc("wms_carts_overview");
+  if (error) { await check(error); $("carts").innerHTML = `<p class="bad">${esc(error.message)}</p>`; return; }
+  const open = d.filter((c) => c.status !== "completed");
+  $("cartsum").textContent = `${open.length} CARTS OPEN · ${fmt(open.reduce((a, c) => a + c.orders, 0))} ORDERS · ${fmt(open.reduce((a, c) => a + (c.units - c.picked), 0))} UNITS TO PICK · ${d.length - open.length} PICKED TODAY`;
+  $("carts").innerHTML = d.length ? d.map((c) => { const [label, col] = SC[c.status] ?? [c.status, "var(--muted)"]; const pct = c.units ? Math.round(100 * c.picked / c.units) : 0;
+    return `<div class="card" data-s="${c.session_id}"><h3>${esc(c.cart)} <span class="chip" style="background:${col}">${label}</span></h3>
+      <div><b>${c.orders}</b> orders · <b>${c.units}</b> units · ${c.stops} stops</div>
+      <div class="bar2"><i style="width:${pct}%"></i></div>
+      <div class="split">${c.picked}/${c.units} picked · totes ${c.totes}/${c.orders}${c.picker ? ` · ${esc(c.picker)}` : ""}</div>
+      <div class="split">Starts at ${esc(c.first_bin ?? "-")} · built ${new Date(c.created_at).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}${c.created_by ? ` by ${esc(c.created_by)}` : ""}</div></div>`; }).join("")
+    : `<p class="panel">No carts yet. Build some from the Orders tab.</p>`;
+}
+$("refreshCarts").onclick = loadCarts;
+$("carts").addEventListener("click", (e) => { const c = e.target.closest("[data-s]"); if (c) openCart(c.dataset.s); });
+
+async function openCart(id) {
+  const { data: d, error } = await sb.rpc("wms_cart_detail", { p_session_id: id });
+  if (error || !d) { await check(error); return; }
+  const s = d.session; const [label] = SC[s.status] ?? [s.status];
+  const canCancel = boss && ["draft", "assigned", "in_progress"].includes(s.status) && !d.picks.some((p) => p.picked > 0);
+  $("detail").hidden = false;
+  $("detail").innerHTML = `<div class="panel">
+    <div class="kicker"><h2>${esc(s.cart ?? "Cart")} · ${label}</h2><span class="mono">ROUTE ${esc((s.route ?? "").toUpperCase())}</span></div>
+    <div class="toolbar noprint"><span class="mono">Built ${new Date(s.created_at).toLocaleString("en-AU")}${s.created_by ? ` by ${esc(s.created_by)}` : ""}${s.picker ? ` · Picker ${esc(s.picker)}` : ""}</span>
+      <span style="flex:1"></span><button class="ghost" id="printcart">Print pick list</button>${canCancel ? `<button class="ghost" id="cancelcart" style="color:var(--red);border-color:var(--red)">Take cart apart</button>` : ""}</div>
+    <h3 style="margin:10px 0 6px">Orders on this cart</h3>
+    <table><tr><th>Tote</th><th>Order</th><th>Customer</th><th>Service</th><th class="num">Picked</th><th>Status</th></tr>
+      ${d.orders.map((o) => `<tr><td class="bin">${esc(o.tote ?? "scan at start")}</td><td><b>#${esc(o.order_number)}</b>${o.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}${o.is_held ? ` <span class="chip amber">ON HOLD</span>` : ""}</td>
+        <td>${esc(o.customer ?? "")}</td><td>${esc(o.service ?? "")}</td><td class="num">${o.picked ?? 0}/${o.units ?? 0}</td><td>${esc(o.status.replace("_", " "))}</td></tr>`).join("")}</table>
+    <h3 style="margin:14px 0 6px">Pick list (walking order)</h3>
+    <table class="picks"><tr><th class="num">#</th><th>Location</th><th></th><th>Product</th><th class="num">Qty</th><th class="num">Picked</th><th>Into tote / order</th></tr>
+      ${d.picks.map((p) => `<tr><td class="num">${p.seq}</td><td><span class="bin">${esc(p.bin)}</span>${p.bin_type !== "pick" ? `<div class="split">${esc(p.bin_type.toUpperCase())}</div>` : ""}</td>
+        <td>${p.image_url ? `<img src="${esc(p.image_url + (p.image_url.includes("?") ? "&" : "?") + "width=88")}" alt="">` : ""}</td>
+        <td><b>${esc(p.name)}</b>${p.variant ? ` <span class="mono">${esc(p.variant)}</span>` : ""}<div class="split">${esc(p.sku)}</div></td>
+        <td class="num"><b>${p.qty}</b></td><td class="num ${p.picked >= p.qty ? "ok" : p.status === "short" ? "bad" : ""}">${p.picked}${p.status === "short" ? " SHORT" : ""}</td>
+        <td class="split">${(p.split ?? []).map((x) => `${esc(x.tote ?? "#" + x.order_number)} ×${x.qty}`).join("<br>")}</td></tr>`).join("")}</table></div>`;
+  $("printcart").onclick = () => window.print();
+  if (canCancel) $("cancelcart").onclick = async () => {
+    if (!confirm(`Take ${s.cart} apart? Its orders go back to Ready and the stock is released.`)) return;
+    const { data: r, error } = await sb.rpc("wms_cancel_pick_session", { p_session_id: id });
+    if (error || !r.ok) { alert(error?.message ?? r.hint ?? r.error); return; }
+    $("detail").hidden = true; loadCarts();
+  };
+  $("detail").scrollIntoView({ behavior: "smooth" });
+}
+if (location.hash === "#carts") tab(2);
+</script>
+</body>
+</html>

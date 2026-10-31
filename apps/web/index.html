@@ -33,6 +33,7 @@
         <a href="/pack.html">Pack desk <span class="chip">PACK</span></a>
         <a href="/search.html">Inventory search <span class="chip">FIND</span></a>
         <a href="/tv.html">Warehouse TV dashboard <span class="chip">SCREEN</span></a>
+        <a href="/history.html" id="histlink" hidden>Stock history (who changed what) <span class="chip">LOG</span></a>
         <a href="/staff.html" id="stafflink" hidden>Staff and PINs <span class="chip">TEAM</span></a>
       </nav>
       <details class="mypin" style="margin-top:14px"><summary class="mono" style="cursor:pointer;min-height:44px;display:flex;align-items:center">Change my PIN</summary>
@@ -60,6 +61,7 @@ async function home(m) {
   document.getElementById("hello").textContent = `Hi ${m.name}`;
   document.getElementById("role").textContent = m.role.toUpperCase();
   document.getElementById("stafflink").hidden = !["admin","supervisor"].includes(m.role);
+  document.getElementById("histlink").hidden = !["admin","supervisor"].includes(m.role);
   me_ = m;
   show("home");
 }

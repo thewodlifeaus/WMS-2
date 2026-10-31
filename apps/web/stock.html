@@ -182,12 +182,12 @@ function adjust(binCode) {
 function adjBox(binCode, item, startMode, onDone) {
   let mode = startMode, q = "", reason = "";
   const now = item.on_hand ?? 0, res = item.allocated ?? 0;
-  const RS = { found: "Found stock", return: "Customer return", count_fix: "Count was wrong", damaged: "Damaged / faulty", other: "Other (write a note)" };
+  const RS = { receiving: "Receiving stock", stocktake: "Stocktake", found: "Found stock", return: "Customer return", count_fix: "Count was wrong", damaged: "Damaged / faulty", other: "Other (write a note)" };
   const draw = () => {
     const n = Number(q || 0);
     const after = mode === "add" ? now + n : mode === "remove" ? now - n : (q === "" ? now : n);
     const change = after - now;
-    const list = change > 0 ? ["found", "return", "count_fix", "other"] : change < 0 ? ["damaged", "count_fix", "other"] : [];
+    const list = change > 0 ? ["receiving", "stocktake", "found", "return", "count_fix", "other"] : change < 0 ? ["stocktake", "damaged", "count_fix", "other"] : [];
     if (!list.includes(reason)) reason = "";
     const problem = after < 0 ? `Only ${now} here.` : after < res ? `${res} are reserved for carts, so it can't go below ${res}.` : "";
     $("mpanel").innerHTML = `<h2>${esc(item.sku)} in ${esc(binCode)}</h2>
@@ -214,7 +214,7 @@ function adjBox(binCode, item, startMode, onDone) {
         const r = await rpc("wms_adjust_stock", { p_bin: binCode, p_product: item.sku, p_mode: mode, p_qty: mode === "set" ? after : n, p_reason: reason, p_note: $("note")?.value.trim() || null });
         $("modal").hidden = true;
         if (!r.ok) { bad(); return msg(r.error === "BELOW_RESERVED" ? `${r.reserved} are reserved for carts: can't go below that.` : r.error === "NOT_ENOUGH" ? `Only ${r.on_hand} here.`
-          : ({ ...ERR, NOTE_REQUIRED: "Write a note.", BAD_REASON: "Pick a reason." }[r.error] ?? r.error), "bad"); }
+          : ({ ...ERR, NOTE_REQUIRED: "Write a note.", BAD_REASON: "Pick a reason.", REASON_WRONG_WAY: "That reason doesn't fit this change. Pick another." }[r.error] ?? r.error), "bad"); }
         onDone(r);
       } catch (e) { $("modal").hidden = true; bad(); msg(e.message, "bad"); } };
   };

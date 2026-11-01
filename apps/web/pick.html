@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/brand.css?v=3">
-<link rel="stylesheet" href="/css/tablet.css?v=3">
+<link rel="stylesheet" href="/css/tablet.css?v=4">
 </head>
 <body>
 <div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc" id="hdr">PICKING</span><span class="mono" style="color:#ccc" id="who"></span></div>
@@ -45,35 +45,79 @@ const reasonLabel = { break: "Break", bathroom: "Bathroom", end_of_shift: "End o
 // ===================== HOME: pick a cart =====================
 let state = null, binOk = false;
 let lastPicks = [], lastSession = null;   // what went into which tote on this cart (newest first)
+let carts = [], chosen = null;   // cart list + the cart being confirmed
+const GRP = { REGS: ["Regular", "#2f5bd3"], PRIO_AU: ["Priority AU", "#c2185b"], PRIO_INT: ["International", "#6a1b9a"], ICON: ["The Iconic", "#111111"], OPENFR8: ["OpenFreight", "#00796b"], PKUP: ["Pickup", "#e65100"], OTHER: ["Other", "#757575"] };
+const grpBadge = (g) => (g ?? "").split("+").filter(Boolean).map((k) => `<span class="chip" style="background:${(GRP[k] ?? [k, "#757575"])[1]};color:#fff">${esc((GRP[k] ?? [k])[0])}</span>`).join(" ");
+const STATE = { not_started: ["Ready", "var(--green)"], paused: ["Paused", "var(--amber)"], released: ["Needs a picker", "var(--orange)"], picking: ["Being picked", "var(--blue)"] };
+// a cart is free to choose unless someone else is picking it or has it paused
+const takenByOther = (c) => !c.mine && c.picker && (c.state === "picking" || c.state === "paused");
+const confirmCode = (c) => c.first_tote ?? c.cart_barcode;   // carts without fixed totes: scan the cart label
+const sameCode = (v, code) => { const a = v.trim().toUpperCase(), b = (code ?? "").toUpperCase();
+  if (a === b) return true;
+  const na = a.match(/^\D*(\d+)$/), nb = b.match(/^(\D*)(\d+)$/);   // typed "26" or "026" for BIN026
+  return !!(na && nb && (a.replace(/\d+$/, "") === "" || a.replace(/\d+$/, "") === nb[1]) && Number(na[1]) === Number(nb[2])); };
+
+// STEP 1: choose a cart from the list
 async function home(note, kind) {
-  state = null; binOk = false; $("hdr").textContent = "PICKING";
-  app.innerHTML = `<div class="step">Start picking</div><div class="huge" style="font-size:44px">Scan a cart</div>
-    <div class="typebox"><input id="typecart" placeholder="or type cart number, eg 7" inputmode="numeric"><button id="gotype">Open</button></div>
-    <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Scan the barcode on the cart, or type its number.")}</div>
+  state = null; chosen = null; binOk = false; $("hdr").textContent = "PICKING";
+  app.innerHTML = `<div class="step">Start picking</div><div class="huge" style="font-size:44px">Choose a cart</div>
+    <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Tap the cart you're taking. You'll scan its first tote to confirm.")}</div>
     <div class="stat" id="rate"></div>
-    <div class="step" style="margin-top:6px">Carts waiting to be picked</div><div class="list" id="carts"><div class="mono">Loading…</div></div>
+    <div class="list" id="carts"><div class="mono">Loading…</div></div>
     <div class="btns" style="margin-top:10px"><a class="ghost tbtn" href="/stock.html">Stock tools (move / merge / look up)</a><button class="ghost" id="out">Sign out</button></div>`;
-  onScan = (v) => openCart(v);
-  $("gotype").onclick = () => { const v = $("typecart").value.trim(); if (v) openCart(v); };
-  $("typecart").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gotype").click(); });
+  // scanning a cart's first tote here skips straight to that cart
+  onScan = (v) => { const c = carts.find((x) => sameCode(v, confirmCode(x)) && v.trim().length > 2);
+    if (c && !takenByOther(c)) { good(); return openCart(c.cart_barcode); }
+    bad(); msg(c ? `${c.cart} is being picked by ${c.picker}.` : "Tap a cart in the list first, then scan its first tote.", "bad"); };
   $("out").onclick = signOut;
   try {
-    const carts = await rpc("wms_pick_carts_available");
-    const GRP = { REGS: ["Regular", "#2f5bd3"], PRIO_AU: ["Priority AU", "#c2185b"], PRIO_INT: ["International", "#6a1b9a"], ICON: ["The Iconic", "#111111"], OPENFR8: ["OpenFreight", "#00796b"], PKUP: ["Pickup", "#e65100"], OTHER: ["Other", "#757575"] };
-    const grpBadge = (g) => (g ?? "").split("+").filter(Boolean).map((k) => `<span class="chip" style="background:${(GRP[k] ?? [k, "#757575"])[1]};color:#fff">${esc((GRP[k] ?? [k])[0])}</span>`).join(" ");
-    const STATE = { not_started: ["Ready", "var(--green)"], paused: ["Paused", "var(--amber)"], released: ["Needs a picker", "var(--orange)"], picking: ["Being picked", "var(--blue)"] };
-    $("carts").innerHTML = carts.length ? carts.map((c) => { const [l, col] = STATE[c.state] ?? [c.state, "var(--muted)"];
-      return `<div class="cart" data-cart="${esc(c.cart_barcode)}"><b class="code">${esc(c.cart)}</b>
+    carts = await rpc("wms_pick_carts_available");
+    const free = carts.filter((c) => !takenByOther(c)), busy = carts.filter(takenByOther);
+    const row = (c, off) => { const [l, col] = STATE[c.state] ?? [c.state, "var(--muted)"];
+      return `<div class="cart ${off ? "off" : ""}" data-pickcart="${esc(c.session_id)}"><b class="code">${esc(c.cart)}</b>
         <div>${grpBadge(c.group)} <b>${c.orders}</b> orders · <b>${c.units - c.picked}</b> units to pick${c.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}
-          <div class="split mono">${c.mine ? "YOUR CART · " : c.picker ? esc(c.picker).toUpperCase() + " · " : ""}${c.pause_reason ? esc(reasonLabel[c.pause_reason] ?? c.pause_reason).toUpperCase() + " · " : ""}START ${esc(c.first_bin ?? "-")}</div></div>
-        <span class="chip" style="background:${col}">${l}</span></div>`; }).join("")
-      : `<div class="card">No carts waiting. Ask a supervisor to build carts in Orders and carts.</div>`;
+          <div class="split mono">${c.mine ? "YOUR CART · " : c.picker ? esc(c.picker).toUpperCase() + " · " : ""}${c.pause_reason ? esc(reasonLabel[c.pause_reason] ?? c.pause_reason).toUpperCase() + " · " : ""}FIRST TOTE ${esc(c.first_tote ?? "-")} · START ${esc(c.first_bin ?? "-")}</div></div>
+        <span class="chip" style="background:${col}">${l}</span></div>`; };
+    $("carts").innerHTML = (free.length ? `<div class="step">Carts ready to pick</div>` + free.map((c) => row(c, false)).join("")
+        : `<div class="card">No carts waiting. Ask a supervisor to build carts in Orders and carts.</div>`)
+      + (busy.length ? `<div class="step" style="margin-top:8px">Being picked by someone else</div>` + busy.map((c) => row(c, true)).join("") : "");
     const rates = await rpc("wms_pick_rates");
     const mine = rates.find((r) => r.staff_id === me.id);
     if (mine) $("rate").innerHTML = `<div><span class="mono">Units today</span><b>${fmt(mine.units)}</b></div><div><span class="mono">Units / hour</span><b>${mine.units_per_hour ?? "-"}</b></div><div><span class="mono">Carts done</span><b>${mine.carts}</b></div>`;
   } catch (e) { msg(e.message, "bad"); }
 }
-app.addEventListener("click", (e) => { const c = e.target.closest("[data-cart]"); if (c && !state) openCart(c.dataset.cart); });
+app.addEventListener("click", (e) => { const c = e.target.closest("[data-pickcart]"); if (!c || state || chosen) return;
+  const cart = carts.find((x) => x.session_id === c.dataset.pickcart); if (!cart) return;
+  if (takenByOther(cart)) {
+    if (["admin", "supervisor"].includes(me?.role)) return confirmCart(cart);   // supervisors can still take it over
+    bad(); return msg(`${cart.cart} is being picked by ${cart.picker}. Choose another cart.`, "bad");
+  }
+  confirmCart(cart); });
+
+// STEP 2: scan the first tote on the cart to prove it's the right one
+function confirmCart(c) {
+  chosen = c; $("hdr").textContent = `${c.cart} · CONFIRM`;
+  const code = confirmCode(c);
+  app.innerHTML = `<div class="step">Step 2 of 2 · confirm the cart</div>
+    <div class="loc"><div class="step">You chose</div><div class="big">${esc(c.cart)}</div></div>
+    <div class="card"><div class="step">${c.first_tote ? "Scan the first tote on this cart" : "Scan the cart label"}</div>
+      <div class="huge" style="font-size:72px;color:var(--orange)">${esc(code)}</div></div>
+    ${typeBox(c.first_tote ? `or type the tote number, eg ${code.replace(/^\D+0*/, "")}` : "or type the cart label")}
+    <div id="msg" class="msg">${c.first_tote ? `Find tote ${esc(code)} at the front of ${esc(c.cart)} and scan it.` : `Scan the label on ${esc(c.cart)}.`}</div>
+    <div class="btns"><button class="ghost" id="back">Choose a different cart</button><span></span></div>`;
+  const check = (v) => {
+    if (sameCode(v, code)) { good(); return openCart(c.cart_barcode, takenByOther(c)); }
+    bad();
+    const other = carts.find((x) => x !== c && sameCode(v, confirmCode(x)));
+    msg(other ? `That's ${v.toUpperCase()}, the first tote on ${other.cart}. You chose ${c.cart}: scan ${code}.` : `That's not ${code}. Scan the first tote on ${c.cart}.`, "bad");
+  };
+  onScan = check;
+  wireType(check);
+  $("back").onclick = () => home();
+}
+function typeBox(ph) { return `<div class="typebox"><input id="typed" placeholder="${esc(ph)}" autocapitalize="characters"><button id="gotype">OK</button></div>`; }
+function wireType(cb) { const go = () => { const v = $("typed").value.trim(); if (v) { $("typed").value = ""; cb(v); } };
+  $("gotype").onclick = go; $("typed").addEventListener("keydown", (e) => { if (e.key === "Enter") go(); }); }
 
 async function openCart(code, takeOver = false) {
   try {
@@ -322,8 +366,8 @@ function pauseBox() {
 function finishScreen() {
   done();
   app.innerHTML = `<div class="card" style="border:3px solid var(--green)"><div class="step">All items picked</div>
-    <div class="big" style="font-size:44px">Scan ${esc(state.cart)} to finish</div></div>
-    <div class="typebox"><input id="typecart" placeholder="or type cart number" inputmode="numeric"><button id="gotype">Finish</button></div>
+    <div class="big" style="font-size:44px">Scan ${esc(state.cart)}'s first tote${chosen?.first_tote ? ` (${esc(chosen.first_tote)})` : ""} to finish</div></div>
+    <div class="typebox"><input id="typecart" placeholder="or type the cart or tote number" inputmode="numeric"><button id="gotype">Finish</button></div>
     <div id="msg" class="msg">${state.exceptions ? `${state.exceptions} item(s) flagged. The packer will be told.` : "Then take the cart to packing."}</div>`;
   const fin = async (v) => {
     try { const r = await rpc("wms_pick_finish_cart", { p_session_id: state.session_id, p_cart: v });
@@ -340,8 +384,8 @@ function summary(r) {
       <div><span class="mono">Minutes</span><b>${r.minutes}</b></div><div><span class="mono">Units / hour</span><b>${r.units_per_hour ?? "-"}</b></div></div>
     ${r.missing.length ? `<div class="msg warn">Missing: ${r.missing.map((m) => `${m.qty} × ${esc(m.sku)} (#${esc(m.order_number)})`).join(", ")}</div>` : ""}
     <button class="signal" id="next" style="min-height:70px;font-size:22px">Next cart</button>`;
-  onScan = (v) => openCart(v);
-  $("next").onclick = () => home("Scan your next cart.");
+  onScan = () => home("Choose your next cart.");
+  $("next").onclick = () => home("Choose your next cart.");
 }
 
 function confirmBox(title, body, yes) {

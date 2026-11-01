@@ -50,3 +50,4 @@
   .lastpick{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;background:#fff3c4;border:2px solid var(--orange);padding:8px 12px}
   .lastpick .ltote{font:900 30px/1 "IBM Plex Mono",monospace;color:var(--ink)}
   .lastpick button{min-height:44px;font-size:15px;padding:0 12px}
+  .cart{cursor:pointer} .cart.off{opacity:.55;background:var(--panel)}

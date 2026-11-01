@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/brand.css?v=3">
-<link rel="stylesheet" href="/css/tablet.css?v=4">
+<link rel="stylesheet" href="/css/tablet.css?v=5">
 <style>
   .menu{display:grid;gap:10px}
   .menu button{min-height:84px;font-size:22px;text-align:left;padding:0 20px;display:flex;justify-content:space-between;align-items:center}
@@ -120,7 +120,9 @@ function findScreen() { $("hdr").textContent = "WHERE IS THIS ITEM";
   app.innerHTML = `<div class="huge" style="font-size:40px">Scan a product</div>${typeBox("or type a SKU")}<div id="msg" class="msg"></div><button class="ghost" id="back">Back</button>`;
   wireType(); $("back").onclick = () => menu(); onScan = (v) => showItem(v);
 }
-async function showItem(v) {
+// receiving / staging locations (eg 0-RECEIVE-01): offer "Put on shelf"
+const isReceiving = (b) => ["receiving", "staging"].includes(b.type) || /RECEIV/i.test(b.bin ?? "");
+async function showItem(v, note, kind) {
   try {
     const r = await rpc("wms_search_inventory", { p_query: v, p_limit: 5 });
     if (!r.length) { bad(); return msg(`${v}: not recognised as a location or product.`, "bad"); }
@@ -129,9 +131,14 @@ async function showItem(v) {
     app.innerHTML = `<div class="card prod">${img(p.image_url, 280)}<div><div class="pname">${esc(p.name)}</div>${p.variant ? `<div class="pvar">${esc(p.variant)}</div>` : ""}<div class="psku">${esc(p.sku)}</div>
         <div class="stat" style="margin-top:8px"><div><span class="mono">On hand</span><b>${fmt(p.on_hand)}</b></div><div><span class="mono">Available</span><b>${fmt(p.available)}</b></div></div></div></div>
       <div class="step">Locations</div>
-      <div class="list">${p.bins.length ? p.bins.map((b) => `<div class="row"><div class="mono">${esc((b.type ?? "").toUpperCase())}</div><div class="bin" style="font:900 26px 'IBM Plex Mono',monospace">${esc(b.bin)}</div>
-        <div class="q">${b.qty}${b.allocated ? `<small>${b.allocated} reserved</small>` : ""}</div></div>`).join("") : `<div class="card">No stock in any location.</div>`}</div>
-      <div id="msg" class="msg">Scan another product or location.</div><button class="ghost" id="back">Back</button>`;
+      <div class="list">${p.bins.length ? p.bins.map((b, ix) => { const free = b.qty - (b.allocated ?? 0), recv = isReceiving(b);
+        return `<div class="row itemloc ${recv ? "recv" : ""}"><div class="mono">${esc((b.type ?? "").toUpperCase())}</div>
+          <div><div class="bin" style="font:900 26px 'IBM Plex Mono',monospace">${esc(b.bin)}</div>
+            ${free > 0 ? `<button class="${recv ? "signal" : "ghost"}" data-mv="${ix}" style="min-height:48px;font-size:16px;margin-top:6px">${recv ? `Put on shelf (${free})` : "Move from here"}</button>` : `<span class="split">All reserved for carts</span>`}</div>
+          <div class="q">${b.qty}${b.allocated ? `<small>${b.allocated} reserved</small>` : ""}</div></div>`; }).join("") : `<div class="card">No stock in any location.</div>`}</div>
+      <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Tap a location to move stock from it, or scan another product or location.")}</div><button class="ghost" id="back">Back</button>`;
+    app.querySelectorAll("[data-mv]").forEach((btn) => btn.onclick = () => { const b = p.bins[Number(btn.dataset.mv)];
+      move(b.bin, { product: p, max: b.qty - (b.allocated ?? 0), reserved: b.allocated ?? 0, back: p.sku }); });
     $("back").onclick = () => menu(); onScan = (x) => lookup(x);
   } catch (e) { bad(); msg(e.message, "bad"); }
 }
@@ -222,8 +229,8 @@ function adjBox(binCode, item, startMode, onDone) {
 }
 
 // ===================== MOVE: from -> product -> qty -> to =====================
-function move(fromCode) {
-  const m = { from: fromCode ?? null, product: null, sku: null, qty: null, max: null };
+function move(fromCode, pre) {
+  const m = { from: fromCode ?? null, product: pre?.product ?? null, sku: pre?.product?.sku ?? null, qty: null, max: pre?.max ?? null, reserved: pre?.reserved ?? 0 };
   const STEPS = ["From", "Product", "Qty", "To"];
   const draw = (text, kind) => {
     const step = !m.from ? 0 : !m.product ? 1 : !m.qty ? 2 : 3;
@@ -233,14 +240,23 @@ function move(fromCode) {
       ${m.product ? `<div class="card"><div class="step">Product</div><div class="pname">${esc(m.product.name)}</div>${m.product.variant ? `<div class="pvar">${esc(m.product.variant)}</div>` : ""}<div class="psku">${esc(m.sku)} · ${m.max} free here${m.reserved ? ` · ${m.reserved} reserved (can't move)` : ""}</div></div>` : ""}
       ${m.qty ? `<div class="card"><div class="step">Quantity</div><div class="huge" style="font-size:56px">${m.qty}</div></div>` : ""}
       <div class="card"><div class="huge" style="font-size:36px">${["Scan the location you're taking stock FROM", "Scan the product", "How many?", "Scan the location you're putting it INTO"][step]}</div>
-        ${step === 2 ? "" : typeBox(["or type the location", "or type the SKU", "", "or type the location"][step])}</div>
+        ${step === 2 ? "" : typeBox(["or type the location", "or type the SKU", "", "or type the location"][step])}
+        ${step === 3 ? shelfHint() : ""}</div>
       <div id="msg" class="msg ${kind ?? ""}">${esc(text ?? "")}</div>
       <div class="btns"><button class="ghost" id="cancel">Cancel</button>${step > 0 ? `<button class="ghost" id="backstep">Back a step</button>` : "<span></span>"}</div>`;
     if (step !== 2) wireType();
-    $("cancel").onclick = () => menu("Move cancelled.");
+    $("cancel").onclick = () => pre?.back ? showItem(pre.back, "Move cancelled.") : menu("Move cancelled.");
     $("backstep")?.addEventListener("click", () => { if (m.qty) m.qty = null; else if (m.product) m.product = null; else m.from = null; draw(); });
-    if (step === 2) qtyPad(m.max, (n) => { m.qty = n; draw(); });
+    if (step === 2) qtyPad(m.max, (n) => { m.qty = n; draw(); }, () => pre?.back ? showItem(pre.back, "Move cancelled.") : menu("Move cancelled."));
   };
+  // where this product already lives (its shelf), so the picker knows where to take it
+  function shelfHint() {
+    const others = (m.product?.bins ?? []).filter((b) => b.bin !== m.from && !isReceiving(b))
+      .sort((a, b) => (a.type === "pick" ? 0 : 1) - (b.type === "pick" ? 0 : 1) || b.qty - a.qty);
+    return others.length ? `<div class="shelfhint"><span class="step">Already stored in</span>${others.slice(0, 4).map((b) =>
+        `<span class="sh"><b>${esc(b.bin)}</b> ${b.qty} ${b.type === "pick" ? "· PICK" : esc((b.type ?? "").toUpperCase())}</span>`).join("")}<span class="split">Scan the location label when you get there.</span></div>`
+      : `<div class="shelfhint"><span class="step">Not stored on a shelf yet</span><span class="split">Scan the location you're putting it into.</span></div>`;
+  }
   onScan = async (v) => {
     try {
       if (!m.from) {
@@ -262,19 +278,20 @@ function move(fromCode) {
       const r = await rpc("wms_move_stock", { p_from_bin: m.from, p_product_barcode: m.sku, p_qty: m.qty, p_to_bin: v });
       if (!r.ok) { bad(); return draw(r.error === "INSUFFICIENT_STOCK" ? `Only ${r.available} free in ${m.from}.` : (ERR[r.error] ?? r.error) + (r.scanned ? ` (${r.scanned})` : ""), "bad"); }
       done();
-      menu(`✓ Moved ${r.qty} × ${r.sku}: ${r.from} (now ${r.from_after}) → ${r.to} (now ${r.to_after}).`, "good");
+      const okMsg = `✓ Moved ${r.qty} × ${r.sku}: ${r.from} (now ${r.from_after}) → ${r.to} (now ${r.to_after}).`;
+      pre?.back ? showItem(pre.back, okMsg, "good") : menu(okMsg, "good");
     } catch (e) { bad(); draw(e.message, "bad"); }
   };
-  draw(fromCode ? "Scan the product." : "");
+  draw(pre ? "" : fromCode ? "Scan the product." : "");
 }
-function qtyPad(max, cb) {
+function qtyPad(max, cb, onCancel) {
   let q = String(max);
   const draw = () => { $("mpanel").innerHTML = `<h2>How many?</h2><div class="qtyshow">${q || "0"}</div><div class="mono" style="text-align:center">${max} FREE IN THIS LOCATION</div>
     <div class="pad">${[1,2,3,4,5,6,7,8,9].map((n) => `<button data-n="${n}">${n}</button>`).join("")}<button data-n="C">Clear</button><button data-n="0">0</button><button data-n="A">All ${max}</button></div>
     <div class="btns"><button class="ghost" id="qno">Cancel</button><button class="signal" id="qyes">Move ${q || 0}</button></div>`;
     $("mpanel").onclick = (e) => { const b = e.target.closest("[data-n]"); if (!b) return; const n = b.dataset.n;
       q = n === "C" ? "" : n === "A" ? String(max) : (q === String(max) ? n : (q + n).replace(/^0+/, "")); draw(); };
-    $("qno").onclick = () => { $("modal").hidden = true; menu("Move cancelled."); };
+    $("qno").onclick = () => { $("modal").hidden = true; onCancel ? onCancel() : menu("Move cancelled."); };
     $("qyes").onclick = () => { const n = Number(q); if (!n) return; if (n > max) { q = String(max); return draw(); } $("modal").hidden = true; cb(n); }; };
   draw(); $("modal").hidden = false;
 }

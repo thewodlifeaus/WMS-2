@@ -51,3 +51,7 @@
   .lastpick .ltote{font:900 30px/1 "IBM Plex Mono",monospace;color:var(--ink)}
   .lastpick button{min-height:44px;font-size:15px;padding:0 12px}
   .cart{cursor:pointer} .cart.off{opacity:.55;background:var(--panel)}
+  .row.recv{border:2px solid var(--orange)}
+  .shelfhint{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+  .shelfhint .sh{font:600 16px "IBM Plex Mono",monospace;background:var(--panel);border:1px solid var(--rule);padding:6px 10px}
+  .shelfhint .sh b{font-size:22px;color:var(--ink)}

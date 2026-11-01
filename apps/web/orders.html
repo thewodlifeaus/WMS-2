@@ -78,6 +78,7 @@
       <span class="seg"><button id="m1" class="on" type="button">1 order per tote</button><button id="m2" type="button">Share totes</button></span>
       <label class="mono">Totes per cart <input id="per" inputmode="numeric" value="25"></label>
       <label class="mono" id="ppt" hidden>Pieces per tote <input id="pieces" inputmode="numeric" value="6"></label>
+      <span class="seg" title="How orders are grouped onto carts"><button id="s1" class="on" type="button">Most urgent first</button><button id="s2" type="button">Fastest picking</button></span>
       <span class="mono" id="cartinfo"></span>
       <span style="flex:1"></span>
       <button class="signal" id="buildbtn" disabled>Build carts</button>
@@ -188,7 +189,8 @@ $("types").addEventListener("click", (e) => {
   const vis = new Set(shown().map((o) => o.id)); for (const id of [...sel]) if (!vis.has(id)) sel.delete(id);
   renderTypes(); loadOrdersRender();
 });
-let shareMode = false;
+let shareMode = false, sortMode = "urgent";
+try { if (localStorage.getItem("wms.cartSort") === "route") sortMode = "route"; } catch {}
 // same packing rules as the database: whole orders only, express first then oldest
 // selected orders split by type: each type is built onto its own carts
 const selByGroup = () => { const m = new Map(); for (const o of (data?.orders ?? []).filter((x) => sel.has(x.id))) { if (!m.has(o.group)) m.set(o.group, []); m.get(o.group).push(o); } return m; };
@@ -230,6 +232,8 @@ function updateSel() {
 }
 function setMode(share) { shareMode = share; $("m1").classList.toggle("on", !share); $("m2").classList.toggle("on", share); $("ppt").hidden = !share; updateSel(); }
 $("m1").onclick = () => setMode(false); $("m2").onclick = () => setMode(true);
+function setSort(m) { sortMode = m; $("s1").classList.toggle("on", m === "urgent"); $("s2").classList.toggle("on", m === "route"); try { localStorage.setItem("wms.cartSort", m); } catch {} }
+$("s1").onclick = () => setSort("urgent"); $("s2").onclick = () => setSort("route"); setSort(sortMode);
 $("pieces").addEventListener("input", updateSel);
 $("per").addEventListener("input", updateSel);
 
@@ -238,13 +242,13 @@ $("buildbtn").onclick = async () => {
   const how = shareMode ? `${p.per} totes per cart, up to ${p.pieces} pieces per tote (orders can share a tote)` : `${p.per} totes per cart, 1 order per tote`;
   const groups = selByGroup();
   const typeList = [...groups.keys()].map((k) => GN[k]?.label ?? k).join(", ");
-  if (!confirm(`Build about ${p.carts} cart(s) from ${sel.size} orders?\n${how}.\nOrder types: ${typeList}${groups.size > 1 ? " (each type goes on its own carts)" : ""}.\nOrders are never split: an order only goes on a cart if it fits whole. Express first, then oldest.`)) return;
+  if (!confirm(`Build about ${p.carts} cart(s) from ${sel.size} orders?\n${how}.\nOrder types: ${typeList}${groups.size > 1 ? " (each type goes on its own carts)" : ""}.\nOrders are never split: an order only goes on a cart if it fits whole.\n${sortMode === "route" ? "Fastest picking: each cart starts with the most urgent order left, then adds the orders closest to it on the walk." : "Most urgent first: express first, then oldest."}`)) return;
   $("buildbtn").disabled = true; $("buildbtn").textContent = "Building…";
   // one build per order type, so a cart only ever holds one type
   const r = { ok: false, carts: [], failed: [], skipped: [], left_over: 0, left_over_orders: [] };
   let error = null;
   for (const [g, orders] of groups) {
-    const res = await sb.rpc("wms_build_carts", { p_order_ids: orders.map((o) => o.id), p_totes_per_cart: p.per, p_pieces_per_tote: p.pieces });
+    const res = await sb.rpc("wms_build_carts_sorted", { p_order_ids: orders.map((o) => o.id), p_totes_per_cart: p.per, p_pieces_per_tote: p.pieces, p_sort: sortMode });
     if (res.error) { error = res.error; break; }
     const x = res.data;
     for (const c of x.carts ?? []) c.group = g;
@@ -260,13 +264,14 @@ $("buildbtn").onclick = async () => {
   const ERR = { NO_READY_ORDERS: "None of those orders are ready.", NO_FREE_CARTS: "All carts are in use." };
   modal(`<h2>${r.ok ? `${r.carts.length} cart${r.carts.length === 1 ? "" : "s"} built` : "No carts built"}</h2>
     ${r.error ? `<p class="bad">${esc(ERR[r.error] ?? r.error)}</p>` : ""}
-    <p class="mono">${esc(how.toUpperCase())}</p>
-    ${(r.carts ?? []).length ? `<table style="margin-top:8px"><tr><th>Cart</th><th>Type</th><th class="num">Orders</th><th class="num">Totes</th><th class="num">Units</th><th class="num">Stops</th><th>Short of stock</th></tr>
-      ${r.carts.map((c) => `<tr><td><b>${esc(c.cart)}</b></td><td>${grpBadge(c.group)}</td><td class="num">${c.orders}</td><td class="num">${c.totes}</td><td class="num">${c.units}</td><td class="num">${c.stops}</td>
+    <p class="mono">${esc(how.toUpperCase())} · ${sortMode === "route" ? "FASTEST PICKING" : "MOST URGENT FIRST"}</p>
+    ${(r.carts ?? []).length ? `<table style="margin-top:8px"><tr><th>Cart</th><th>Type</th><th class="num">Orders</th><th class="num">Totes</th><th class="num">Units</th><th class="num">Stops</th><th class="num" title="Estimated walk from the packing desks and back. 1 = one aisle length (west to east)">Walk</th><th>Short of stock</th></tr>
+      ${r.carts.map((c) => `<tr><td><b>${esc(c.cart)}</b></td><td>${grpBadge(c.group)}</td><td class="num">${c.orders}</td><td class="num">${c.totes}</td><td class="num">${c.units}</td><td class="num">${c.stops}</td><td class="num">${c.walk != null ? `${Number(c.walk).toFixed(1)}` : "-"}</td>
         <td>${(c.shortages ?? []).map((s) => `<span class="tag">${esc(s.sku)} ×${s.short}</span>`).join("") || "-"}</td></tr>`).join("")}</table>` : ""}
     ${(r.failed ?? []).length ? `<p class="bad" style="margin-top:8px">Not built: ${r.failed.map((f) => `${esc(f.cart)} (${esc(f.error)})`).join("; ")}</p>` : ""}
     ${(r.skipped ?? []).length ? `<p class="warn" style="margin-top:8px">Skipped ${r.skipped.length}: ${r.skipped.map((s) => `#${esc(s.order_number)} (${esc(s.reason.replace("_", " "))})`).join(", ")}</p>` : ""}
     ${r.left_over ? `<p class="warn" style="margin-top:8px">${r.left_over} orders left in the queue (not enough free carts): ${(r.left_over_orders ?? []).slice(0, 20).map((n) => "#" + esc(n)).join(", ")}</p>` : ""}
+    ${(r.carts ?? []).some((c) => c.walk != null) ? `<p class="mono" style="margin-top:8px">WALK = ESTIMATED WALK FROM THE DESKS AND BACK, IN AISLE LENGTHS (1 = WEST TO EAST ONCE). TOTAL ${r.carts.reduce((a, c) => a + (Number(c.walk) || 0), 0).toFixed(1)}</p>` : ""}
     <p class="mono" style="margin-top:10px">${(r.carts ?? []).some((c) => c.fixed_totes) ? "Orders are already placed in the totes on each cart (eg CART02 tote 1 = BIN026). Pickers just scan the cart to start." : "Pickers scan the cart, then one empty tote per tote number, to start."}</p>`);
   loadOrders();
 };
@@ -420,7 +425,7 @@ async function openCart(id) {
   const canRelease = boss && ["draft", "assigned", "in_progress"].includes(s.status) && s.picker;
   $("detail").hidden = false; $("detail").dataset.sid = id;
   $("detail").innerHTML = `<div class="panel">
-    <div class="kicker"><h2>${esc(s.cart ?? "Cart")} · ${label} · ${s.tote_slots ?? "-"} totes</h2><div>${grpBadge(s.group)}</div><span class="mono">ROUTE ${esc((s.route ?? "").toUpperCase())}</span></div>
+    <div class="kicker"><h2>${esc(s.cart ?? "Cart")} · ${label} · ${s.tote_slots ?? "-"} totes</h2><div>${grpBadge(s.group)}</div><span class="mono">SHORTEST-WALK ROUTE</span></div>
     <div class="toolbar noprint"><span class="mono">Built ${new Date(s.created_at).toLocaleString("en-AU")}${s.created_by ? ` by ${esc(s.created_by)}` : ""}${s.picker ? ` · Picker ${esc(s.picker)}` : ""}${s.paused ? ` · ${s.picker ? "PAUSED" : "NEEDS A PICKER"} (${esc((s.pause_reason ?? "").replace(/_/g, " "))})` : ""}</span>
       <span style="flex:1"></span><button class="ghost" id="printcart">Print pick list</button>${canRelease ? `<button class="ghost" id="releasecart">Unassign ${esc(s.picker)}</button>` : ""}${canCancel ? `<button class="ghost" id="cancelcart" style="color:var(--red);border-color:var(--red)">Take cart apart</button>` : ""}</div>
     <h3 style="margin:10px 0 6px">Orders on this cart</h3>

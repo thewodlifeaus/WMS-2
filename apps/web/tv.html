@@ -40,7 +40,7 @@
 </style>
 </head>
 <body>
-<div class="bar"><span class="logo">TWL</span><span class="mono" id="day" style="color:#ddd;font-size:1em"></span><span class="clock" id="clock"></span></div>
+<div class="bar"><span class="logo">TWL</span><span class="mono" id="day" style="color:#ddd;font-size:1em"></span><span style="display:flex;align-items:center;gap:16px"><span class="clock" id="clock"></span><button class="ghost" id="out" style="color:#fff;border-color:#888;min-height:36px;font-size:14px;padding:0 12px;opacity:.7">Log out</button></span></div>
 <main class="tv">
   <section class="row r1">
     <div class="panel dial"><div class="kicker" style="width:100%"><h2>Score vs last working day</h2><span class="mono" id="lwdLabel">FL.01</span></div><svg id="dial1" viewBox="0 0 200 118"></svg><div class="val" id="s1">-</div><div class="legend">RED UNDER 85 · AMBER 85-99 · GREEN 100+ (100 = SAME PACE)</div></div>
@@ -63,7 +63,8 @@
   </section>
 </main>
 <script type="module">
-import { sb, requireLogin, fmt, esc } from "/js/app.js?v=5";
+import { sb, requireLogin, fmt, esc, signOut } from "/js/app.js?v=5";
+document.getElementById("out").onclick = () => { if (confirm("Log out of the TV dashboard?")) signOut(); };
 await requireLogin();
 const $ = (id) => document.getElementById(id);
 const tz = "Australia/Adelaide";

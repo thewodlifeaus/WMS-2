@@ -10,6 +10,8 @@ begin
   perform set_config('request.jwt.claim.sub', boss::text, true);
   insert into warehouses(code, name) values ('WRT', 'Walk test') returning id into wh;
   insert into products(sku, name) values ('WR-A', 'Walk A') returning id into p1;
+  insert into walk_config(id, warehouse_id, depot_way, depot_x, way_gap) values (1, wh, 3.5, 0, 0.11)
+  on conflict (id) do update set warehouse_id = wh;
   -- single rows A (boxes 09-32), C (01-16), T (01-24)
   foreach L in array array['A','C','T'] loop
     seq := seq + 1;
@@ -56,8 +58,8 @@ begin
   select s, row_number() over (order by b.code desc), b.id, p1, 1 from bins b
    where b.warehouse_id = wh and b.code in ('NA-03-02','EA-01-01','A-30-00','FM-08-01','OB-01-01','C-02-00','GA-02-01');
   select string_agg(b.code, ' > ' order by t.sequence) into seqs from pick_tasks t join bins b on b.id = t.bin_id where t.session_id = s;
-  -- walkway 1 in and back out (C, then A-30), EA near the west end, walk F/G west to east, come back through N/O east to west
-  assert seqs = 'C-02-00 > A-30-00 > EA-01-01 > GA-02-01 > FM-08-01 > OB-01-01 > NA-03-02', seqs;
+  -- from the desks: F/G west to east, up the east walkway to A-30, back west along A/C, D/E, then down to N/O and back to the desks
+  assert seqs = 'GA-02-01 > FM-08-01 > A-30-00 > C-02-00 > EA-01-01 > NA-03-02 > OB-01-01', seqs;
   assert (select min(sequence) = 1 and max(sequence) = 7 from pick_tasks where session_id = s), 'numbered 1..7';
 
   -- only west-end stops: every walkway is in and out from the west
@@ -66,7 +68,7 @@ begin
   select s, row_number() over (order by b.code), b.id, p1, 1 from bins b
    where b.warehouse_id = wh and b.code in ('T-01-02','EA-01-01','NA-03-02','C-02-00');
   select string_agg(b.code, ' > ' order by t.sequence) into seqs from pick_tasks t join bins b on b.id = t.bin_id where t.session_id = s;
-  assert seqs = 'C-02-00 > EA-01-01 > NA-03-02 > T-01-02', seqs;
+  assert seqs = 'EA-01-01 > C-02-00 > NA-03-02 > T-01-02', seqs;
 
   -- east wall: S stops picked while at the east end
   insert into pick_sessions(warehouse_id, status, method) values (wh, 'draft', 'cluster') returning id into s;

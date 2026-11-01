@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/brand.css?v=3">
-<link rel="stylesheet" href="/css/tablet.css?v=2">
+<link rel="stylesheet" href="/css/tablet.css?v=3">
 </head>
 <body>
 <div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc" id="hdr">PICKING</span><span class="mono" style="color:#ccc" id="who"></span></div>
@@ -44,6 +44,7 @@ const reasonLabel = { break: "Break", bathroom: "Bathroom", end_of_shift: "End o
 
 // ===================== HOME: pick a cart =====================
 let state = null, binOk = false;
+let lastPicks = [], lastSession = null;   // what went into which tote on this cart (newest first)
 async function home(note, kind) {
   state = null; binOk = false; $("hdr").textContent = "PICKING";
   app.innerHTML = `<div class="step">Start picking</div><div class="huge" style="font-size:44px">Scan a cart</div>
@@ -132,6 +133,9 @@ function pickScreen() {
   app.innerHTML = `
     <div class="prog"><span>STOP ${p.done + 1} OF ${p.total}</span><span>${state.picked}/${state.units} UNITS</span></div>
     <div class="bar2"><i style="width:${pct}%"></i></div>
+    ${lastSession === state.session_id && lastPicks.length ? `<div class="lastpick" id="lastpick"><span class="step">Last pick</span>
+      <span>${lastPicks.filter((x) => x.scan === lastPicks[0].scan).reverse().map((x) => `<b>${x.qty} × ${esc(x.sku)}</b> for #${esc(x.order)} → <span class="ltote">${esc(x.tote ?? "#" + x.order)}</span>`).join("<br>")}</span>
+      <span></span><button class="ghost" id="lphist">Recent</button></div>` : ""}
     <div class="loc ${binOk ? "ok" : ""}"><div class="step">${binOk ? "✓ Location confirmed" : "Go to location, scan the location label"}</div><div class="big">${esc(t.bin)}</div></div>
     <div class="card prod">${t.image_url ? `<img src="${esc(t.image_url + (t.image_url.includes("?") ? "&" : "?") + "width=280")}" alt="">` : `<div class="noimg"></div>`}
       <div><div class="pname">${esc(t.name)}</div>${t.variant ? `<div class="pvar">${esc(t.variant)}</div>` : ""}<div class="psku">${esc(t.sku)}</div></div></div>
@@ -146,6 +150,7 @@ function pickScreen() {
     <div class="btns"><button class="ghost" id="cant" style="color:var(--red);border-color:var(--red)">Can't pick this</button><button class="ghost" id="pause">Pause</button></div>`;
   $("pause").onclick = pauseBox;
   $("cant").onclick = () => cantPickBox(t);
+  $("lphist")?.addEventListener("click", recentBox);
   if (binOk) $("fixcount").onclick = () => countBox(t);
   onScan = async (v) => {
     try {
@@ -174,10 +179,27 @@ async function doPick(t, barcode, qty) {
     return msg({ WRONG_ITEM: `WRONG ITEM. You scanned ${r.scanned_sku}. Need ${r.expected_sku}.`, UNKNOWN_BARCODE: "Barcode not recognised. Scan the product barcode.",
       OVER_QTY: `Too many. Only ${r.remaining} needed.`, NOT_CURRENT_TASK: "That's not this stop. Refreshing…", SESSION_NOT_STARTED: "Cart is paused. Scan the cart to resume." }[r.error] ?? r.error, "bad");
   }
-  const into = (r.put_into ?? []).map((x) => `${x.qty} into #${x.order_number}`).join(", ");
+  // which tote each unit went into (from the stop's tote list)
+  if (lastSession !== state.session_id) { lastPicks = []; lastSession = state.session_id; }
+  const placed = (r.put_into ?? []).map((x) => ({ qty: x.qty, order: x.order_number, sku: t.sku, name: t.name, variant: t.variant,
+    tote: (t.put_into ?? []).find((y) => y.order_number === x.order_number)?.basket_barcode ?? null, at: new Date(), scan: Date.now() }));
+  const scanId = placed[0]?.scan; placed.forEach((x) => { x.scan = scanId; });
+  lastPicks = placed.reverse().concat(lastPicks).slice(0, 30); placed.reverse();
+  const into = placed.map((x) => `${x.qty} item${x.qty === 1 ? "" : "s"} picked for order #${x.order}${x.tote ? ` into ${x.tote}` : ""}`).join("; ");
   if (r.task_done) { binOk = false; }
   good(); await refresh();
-  msg(`✓ ${r.qty} picked${into ? `: ${into}` : ""}.`, "good");
+  msg(`✓ ${into || r.qty + " picked"}.`, "good");
+}
+
+// what went into which tote on this cart (newest first)
+function recentBox() {
+  $("mpanel").innerHTML = `<h2>Recent picks on ${esc(state.cart)}</h2>
+    <div class="list">${lastPicks.map((x) => `<div class="cart" style="grid-template-columns:auto 1fr auto"><b class="code" style="color:var(--orange)">${esc(x.tote ?? "-")}</b>
+      <div><b>${x.qty} × ${esc(x.sku)}</b>${x.variant ? ` <span class="mono">${esc(x.variant)}</span>` : ""}<div class="split mono">ORDER #${esc(x.order)}</div></div>
+      <span class="mono">${x.at.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}</span></div>`).join("")}</div>
+    <div class="btns"><button class="ghost" id="rclose">Close</button><span></span></div>`;
+  $("rclose").onclick = () => { $("modal").hidden = true; };
+  $("modal").hidden = false;
 }
 
 // quantity pad (scan once, enter how many)

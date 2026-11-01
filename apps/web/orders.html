@@ -47,6 +47,9 @@
   .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
   .modal .panel{max-width:640px;width:100%;max-height:85vh;overflow:auto}
   .last{font-size:13px}
+  .findbox{margin-bottom:12px} .findbox input{font-size:18px;min-height:50px}
+  .hit{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:10px 4px;border-bottom:1px solid var(--rule)}
+  .hit .where{font-weight:800;color:var(--ink)} .hit .tote{font:900 26px "IBM Plex Mono",monospace;color:var(--ink);min-width:110px}
   @media print{.bar,.tabs,#ordersTab,.cardsWrap,.noprint{display:none!important}.detail{margin:0}body{background:#fff}}
 </style>
 </head>
@@ -73,7 +76,7 @@
       <span><b id="selcount">0</b> <span class="mono">ORDERS SELECTED</span></span>
       <label class="mono">Select first <input id="firstn" inputmode="numeric" value="60"></label><button class="ghost" id="pickfirst" style="color:#fff;border-color:#fff">Select</button>
       <span class="seg"><button id="m1" class="on" type="button">1 order per tote</button><button id="m2" type="button">Share totes</button></span>
-      <label class="mono">Totes per cart <input id="per" inputmode="numeric" value="12"></label>
+      <label class="mono">Totes per cart <input id="per" inputmode="numeric" value="25"></label>
       <label class="mono" id="ppt" hidden>Pieces per tote <input id="pieces" inputmode="numeric" value="6"></label>
       <span class="mono" id="cartinfo"></span>
       <span style="flex:1"></span>
@@ -83,6 +86,9 @@
 
   <section id="cartsTab" hidden>
     <div class="cardsWrap">
+      <div class="panel findbox"><div class="kicker"><h2>Find an order on a cart</h2><span class="mono">CANCELLED OR CHANGED? FIND IT FAST</span></div>
+        <input id="findq" placeholder="Order number, customer name, or scan a tote (eg BIN053)" autocomplete="off">
+        <div id="found"></div></div>
       <div class="toolbar"><span class="mono" id="cartsum"></span><span style="flex:1"></span><button class="ghost" id="refreshCarts">Refresh</button></div>
       <div class="carts" id="carts"></div>
       <h3 style="margin:16px 0 6px">Picking rates today</h3>
@@ -261,7 +267,7 @@ $("buildbtn").onclick = async () => {
     ${(r.failed ?? []).length ? `<p class="bad" style="margin-top:8px">Not built: ${r.failed.map((f) => `${esc(f.cart)} (${esc(f.error)})`).join("; ")}</p>` : ""}
     ${(r.skipped ?? []).length ? `<p class="warn" style="margin-top:8px">Skipped ${r.skipped.length}: ${r.skipped.map((s) => `#${esc(s.order_number)} (${esc(s.reason.replace("_", " "))})`).join(", ")}</p>` : ""}
     ${r.left_over ? `<p class="warn" style="margin-top:8px">${r.left_over} orders left in the queue (not enough free carts): ${(r.left_over_orders ?? []).slice(0, 20).map((n) => "#" + esc(n)).join(", ")}</p>` : ""}
-    <p class="mono" style="margin-top:10px">Pickers scan the cart, then one empty tote per tote number, to start.</p>`);
+    <p class="mono" style="margin-top:10px">${(r.carts ?? []).some((c) => c.fixed_totes) ? "Orders are already placed in the totes on each cart (eg CART02 tote 1 = BIN026). Pickers just scan the cart to start." : "Pickers scan the cart, then one empty tote per tote number, to start."}</p>`);
   loadOrders();
 };
 
@@ -305,6 +311,30 @@ async function loadRates() {
     : `<tr><td colspan="7">No picking yet today.</td></tr>`;
 }
 $("carts").addEventListener("click", (e) => { const c = e.target.closest("[data-s]"); if (c) openCart(c.dataset.s); });
+
+// find an order on a cart (order number, customer, or tote barcode)
+let ftimer;
+$("findq").addEventListener("input", () => { clearTimeout(ftimer); ftimer = setTimeout(findOrder, 300); });
+$("findq").addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(ftimer); findOrder(); } });
+async function findOrder() {
+  const q = $("findq").value.trim();
+  if (q.length < 2) { $("found").innerHTML = ""; return; }
+  const { data: r, error } = await sb.rpc("wms_find_order", { p_text: q });
+  if (error) { await check(error); $("found").innerHTML = `<p class="bad">${esc(error.message)}</p>`; return; }
+  $("found").innerHTML = r.length ? r.map((o) => `<div class="hit">
+      <div class="tote">${esc(o.tote ?? o.cart ?? "-")}</div>
+      <div><b>#${esc(o.order_number)}</b> ${esc(o.customer ?? "")} ${o.group ? grpBadge(o.group) : ""}
+        <div class="where">${esc(o.where)}</div>
+        <div class="split">${o.picked}/${o.units} picked${o.picker ? ` · picker ${esc(o.picker)}` : ""}${o.shared_with ? ` · shares tote with ${esc(o.shared_with)}` : ""}${o.is_held ? ` · ON HOLD${o.hold_reason ? ": " + esc(o.hold_reason) : ""}` : ""}</div></div>
+      <div>${o.session_id ? `<button class="ghost" data-open="${o.session_id}" data-num="${esc(o.order_number)}">Open cart</button>` : ""}</div></div>`).join("")
+    : `<p class="mono" style="margin-top:8px">No order matches "${esc(q)}".</p>`;
+}
+$("found").addEventListener("click", async (e) => { const b = e.target.closest("[data-open]"); if (!b) return;
+  await openCart(b.dataset.open);
+  // highlight the order in the cart's order list
+  const re = new RegExp("^#" + b.dataset.num.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?!\\d)");
+  for (const tr of $("detail").querySelectorAll("tr")) if (re.test(tr.cells?.[1]?.textContent.trim() ?? "")) { tr.style.background = "#fff3c4"; tr.style.outline = "3px solid var(--orange)"; tr.scrollIntoView({ block: "center" }); }
+});
 
 async function openCart(id) {
   const { data: d, error } = await sb.rpc("wms_cart_detail", { p_session_id: id });

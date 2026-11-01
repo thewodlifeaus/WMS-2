@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Settings · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  .wrap{max-width:1400px}
+  .tabs{display:flex;gap:0;margin-bottom:14px;border-bottom:1px solid var(--ink)}
+  .tabs button{background:transparent;color:var(--ink);border:1px solid var(--rule);border-bottom:none}
+  .tabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
+  .row label{display:grid;gap:4px}
+  td{font-size:14px;vertical-align:middle}
+  .code{font:600 15px "IBM Plex Mono",monospace;color:var(--ink);white-space:nowrap}
+  .small{font-size:12px;color:var(--muted)}
+  .t{display:inline-block;font:800 11px Archivo,sans-serif;letter-spacing:.04em;padding:3px 7px;color:#fff;white-space:nowrap}
+  .yes{color:var(--green);font-weight:800} .no{color:var(--red);font-weight:800}
+  .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
+  .modal .panel{max-width:680px;width:100%;max-height:92vh;overflow:auto}
+  textarea{font:500 14px "IBM Plex Mono",monospace;width:100%;min-height:120px;padding:10px;border:1px solid var(--rule)}
+  .bulk{position:sticky;top:0;z-index:5;background:var(--ink);color:#fff;padding:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  .bulk select{width:auto;min-height:40px}
+  .bulk button{min-height:40px;border-color:#fff}
+  .help{background:var(--panel);border-left:4px solid var(--blue);padding:10px 12px;margin-bottom:12px;font-size:14px}
+  .help b{color:var(--ink)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px}
+  .totes{font:500 12px "IBM Plex Mono",monospace;color:var(--muted)}
+  tr.off td{color:var(--muted)}
+  input[type=checkbox]{width:22px;min-height:22px;height:22px}
+  .bad{color:var(--red);font-weight:700}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:800px){.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc">SETTINGS</span><button class="ghost" id="out" style="border-color:#fff">Sign out</button></div>
+<main class="wrap">
+  <div class="tabs"><button id="tabCarts" class="on">Carts and totes</button><button id="tabLocs">Locations</button></div>
+
+  <!-- CARTS -->
+  <section id="carts">
+    <div class="help">Each cart has its totes in order. <b>Tote 1 is the first tote</b>, the one pickers scan to start the cart. A cart can only be changed when nobody is picking it and none of its totes are waiting to be packed. Totes taken off a cart become <b>loose totes</b> and can go on another cart.</div>
+    <div class="row" style="margin-bottom:10px">
+      <label><span class="mono">New cart name</span><input id="newCart" placeholder="eg CART20" style="width:200px"></label>
+      <button id="addCart">Add cart</button><span id="cartErr" class="err"></span>
+    </div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>Cart</th><th>Status</th><th class="num">Totes</th><th>Totes in order</th><th>On</th><th></th></tr></thead>
+      <tbody id="cartRows"><tr><td colspan="6" class="mono">Loading…</td></tr></tbody>
+    </table></div>
+    <p class="small" style="margin-top:10px" id="looseLine"></p>
+  </section>
+
+  <!-- LOCATIONS -->
+  <section id="locs" hidden>
+    <div class="help"><b>Shelf</b>, <b>Backstock</b> and <b>Receiving</b> locations can be picked from (pickers are sent to Shelf locations first). <b>Reserved</b>, Staging, Packing and Quarantine are never picked. Any location can be set to <b>always</b> or <b>never</b> pick instead. A location can only be switched off when it's empty. Nothing is ever deleted: switched-off locations keep their history.</div>
+    <details class="panel" id="addBox" style="margin-bottom:12px"><summary class="mono" style="cursor:pointer;min-height:36px;display:flex;align-items:center">+ Add locations</summary>
+      <div class="grid2" style="margin-top:10px">
+        <div>
+          <div class="mono" style="margin-bottom:4px">Build a range</div>
+          <div class="row">
+            <label><span class="mono">Row</span><input id="rRow" placeholder="EA" style="width:80px"></label>
+            <label><span class="mono">Shelf from</span><input id="rS1" placeholder="01" style="width:80px" inputmode="numeric"></label>
+            <label><span class="mono">to</span><input id="rS2" placeholder="08" style="width:80px" inputmode="numeric"></label>
+            <label><span class="mono">Bin from</span><input id="rB1" placeholder="01" style="width:80px" inputmode="numeric"></label>
+            <label><span class="mono">to</span><input id="rB2" placeholder="04" style="width:80px" inputmode="numeric"></label>
+            <button class="ghost" id="rGo">Fill list</button>
+          </div>
+          <p class="small" style="margin-top:6px">Leave the bins blank for 2-part codes (eg SA-01). Numbers keep their zeros (01, 02…).</p>
+        </div>
+        <div>
+          <label style="display:grid;gap:4px"><span class="mono">Location codes (one per line)</span><textarea id="addCodes" placeholder="EA-09-01&#10;EA-09-02&#10;0-RETURNS"></textarea></label>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label><span class="mono">Type</span><select id="addType" style="width:220px"></select></label>
+        <label><span class="mono">Zone</span><select id="addZone" style="width:200px"></select></label>
+        <label id="newZoneLbl" hidden><span class="mono">New zone code</span><input id="newZone" style="width:140px" placeholder="eg BULK"></label>
+        <button class="signal" id="addPreview">Check and add</button><span id="addErr" class="err"></span>
+      </div>
+    </details>
+
+    <div class="row" style="margin-bottom:6px">
+      <label style="flex:1;min-width:200px"><span class="mono">Search</span><input id="lq" placeholder="Location code, eg EA-01 or 0-REC"></label>
+      <label><span class="mono">Type</span><select id="lType" style="width:200px"><option value="">All types</option></select></label>
+      <label><span class="mono">Zone</span><select id="lZone" style="width:140px"><option value="">All zones</option></select></label>
+      <label><span class="mono">Show</span><select id="lStatus" style="width:140px"><option value="active">Switched on</option><option value="inactive">Switched off</option><option value="all">All</option></select></label>
+    </div>
+    <div class="chips" id="typeChips"></div>
+    <div class="bulk" id="bulk" hidden>
+      <b id="selN">0 selected</b>
+      <select id="bType"><option value="">Type: no change</option></select>
+      <select id="bZone"><option value="">Zone: no change</option></select>
+      <select id="bPick"><option value="">Picking: no change</option><option value="type">Picking: follow the type</option><option value="always">Picking: always</option><option value="never">Picking: never</option></select>
+      <button class="signal" id="bApply">Apply</button>
+      <button class="ghost" id="bOff" style="color:#fff">Switch off</button>
+      <button class="ghost" id="bOn" style="color:#fff">Switch on</button>
+      <button class="ghost" id="bClear" style="color:#fff">Clear</button>
+    </div>
+    <div class="row" style="margin-bottom:6px"><span class="mono" id="lCount"></span><span id="lErr" class="err"></span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th><input type="checkbox" id="selAll" title="Select all shown"></th><th>Location</th><th>Type</th><th>Zone</th><th>Can pick</th><th class="num">Units</th><th class="num">SKUs</th><th>On</th></tr></thead>
+      <tbody id="locRows"><tr><td colspan="8" class="mono">Loading…</td></tr></tbody>
+    </table></div>
+    <div style="text-align:center;margin:12px 0"><button class="ghost" id="lMore" hidden>Show more</button></div>
+  </section>
+  <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
+</main>
+<div class="modal" id="modal" hidden><div class="panel"><div id="mbody"></div><div style="margin-top:12px;text-align:right"><button class="ghost" id="mclose">Close</button></div></div></div>
+<script type="module">
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=5";
+const m = await requireLogin();
+const $ = (id) => document.getElementById(id);
+$("out").onclick = signOut;
+
+const TYPES = {
+  pick: ["Shelf", "#2E7D4F"], backfill: ["Backstock", "#5A73B0"], receiving: ["Receiving", "#6a1b9a"], reserved: ["Reserved (not picked)", "#5E5A55"],
+  staging: ["Staging", "#B7791F"], packing: ["Packing", "#111"], quarantine: ["Quarantine (damaged)", "#B42318"] };
+const PICKS = ["pick", "backfill", "receiving"];
+const typeTag = (t) => { const [l, c] = TYPES[t] ?? [t, "#757575"]; return `<span class="t" style="background:${c}">${esc(l)}</span>`; };
+const typeOpts = Object.entries(TYPES).map(([k, [l]]) => `<option value="${k}">${esc(l)}${PICKS.includes(k) ? " · picked" : ""}</option>`).join("");
+$("addType").innerHTML = typeOpts; $("lType").innerHTML += typeOpts; $("bType").innerHTML += typeOpts;
+
+async function rpc(fn, args) {
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) { if (/FORBIDDEN|NOT_STAFF|JWT/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/settings.html"; } throw error; }
+  return data;
+}
+function modal(html) { $("mbody").innerHTML = html; $("modal").hidden = false; }
+$("mclose").onclick = () => { $("modal").hidden = true; };
+const closeModal = () => { $("modal").hidden = true; };
+
+// tabs
+const tab = (which) => {
+  $("carts").hidden = which !== "carts"; $("locs").hidden = which !== "locs";
+  $("tabCarts").classList.toggle("on", which === "carts"); $("tabLocs").classList.toggle("on", which === "locs");
+  try { localStorage.setItem("wms.settings.tab", which); } catch {}
+  if (which === "locs" && !locLoaded) loadLocs();
+};
+$("tabCarts").onclick = () => tab("carts"); $("tabLocs").onclick = () => tab("locs");
+
+// ---------------------------------------------------------------- carts
+let carts = [];
+const ERR = { CODE_TAKEN: "That name is already used by another cart.", BAD_CODE: "Use letters and numbers only (eg CART21).",
+  CART_BUSY: "This cart is being picked or has totes waiting to be packed. Finish or take the cart apart (Orders and carts) first.",
+  DUPLICATE: "The same tote barcode is in the list twice.", TOO_MANY: "A cart can have at most 48 totes.", BAD_BARCODE: "Tote barcodes can only use letters, numbers, - and _.",
+  TOTE_IN_USE: "One of these loose totes is on a cart that's being picked.", BARCODE_IS_A_CART: "A tote can't have the same barcode as a cart.",
+  NOT_FOUND: "Not found.", FORBIDDEN: "Only admins can change settings." };
+const errText = (r) => r.error === "TOTE_ON_OTHER_CART" ? `Already on another cart: ${r.totes.map((t) => `${t.barcode} (${t.cart})`).join(", ")}. Take them off that cart first.`
+  : r.error === "DUPLICATE" ? `${ERR.DUPLICATE} ${(r.barcodes ?? []).join(", ")}` : ERR[r.error] ?? r.error;
+
+async function loadCarts() {
+  try {
+    const d = await rpc("wms_admin_carts");
+    carts = d.carts;
+    $("cartRows").innerHTML = carts.map((c) => {
+      const status = c.open_pick ? `<span class="chip amber">${c.open_pick === "in_progress" ? "Picking" : c.open_pick === "assigned" ? "Assigned" : "Built"}</span>${c.picker ? ` <span class="small">${esc(c.picker)}</span>` : ""}`
+        : !c.free ? `<span class="chip amber">Waiting to pack</span>` : c.active ? `<span class="chip green">Free</span>` : `<span class="chip ink">Off</span>`;
+      const t = c.totes;
+      return `<tr class="${c.active ? "" : "off"}"><td class="code">${esc(c.code)}</td><td>${status}</td><td class="num"><b>${t.length || "-"}</b></td>
+        <td class="totes">${t.length ? `${esc(t[0])} → ${esc(t[t.length - 1])}` : "No fixed totes (pickers scan loose totes)"}</td>
+        <td>${c.active ? "Yes" : "No"}</td><td style="text-align:right"><button class="ghost" data-cart="${c.id}" style="min-height:36px">Edit</button></td></tr>`;
+    }).join("");
+    $("looseLine").textContent = d.loose.length ? `Loose totes (not on a cart): ${d.loose.map((t) => t.barcode).join(", ")}` : "No loose totes.";
+  } catch (e) { $("cartRows").innerHTML = `<tr><td colspan="6" class="err">${esc(e.message)}</td></tr>`; }
+}
+$("addCart").onclick = async () => {
+  $("cartErr").textContent = "";
+  const code = $("newCart").value.trim(); if (!code) return;
+  const r = await rpc("wms_admin_save_cart", { p_cart_id: null, p_code: code, p_active: true });
+  if (!r.ok) return ($("cartErr").textContent = errText(r));
+  $("newCart").value = ""; await loadCarts(); editCart(r.id);
+};
+$("cartRows").addEventListener("click", (e) => { const b = e.target.closest("[data-cart]"); if (b) editCart(b.dataset.cart); });
+
+// "BIN026" + 25 -> BIN026 ... BIN050 (keeps the zero padding)
+function range(first, count) {
+  const mm = /^(.*?)(\d+)$/.exec(first.trim().toUpperCase()); if (!mm) return null;
+  const [, pre, num] = mm, w = num.length, start = Number(num);
+  return Array.from({ length: count }, (_, i) => pre + String(start + i).padStart(w, "0"));
+}
+function editCart(id) {
+  const c = carts.find((x) => x.id === id); if (!c) return;
+  modal(`<h2>${esc(c.code)}</h2>
+    ${c.free ? "" : `<p class="bad" style="margin:6px 0">${esc(ERR.CART_BUSY)}</p>`}
+    <div class="row" style="margin:10px 0"><label><span class="mono">Cart name</span><input id="eCode" value="${esc(c.code)}" style="width:180px"></label>
+      <label style="display:flex;gap:8px;align-items:center;min-height:44px"><input type="checkbox" id="eOn" ${c.active ? "checked" : ""}> <span>Cart is in use</span></label>
+      <button id="eSave">Save name / on-off</button></div>
+    <div class="kicker" style="margin-top:14px"><h2>Totes on this cart</h2><span class="mono" id="eN">${c.totes.length} TOTES</span></div>
+    <div class="row"><label><span class="mono">First tote barcode</span><input id="eFirst" value="${esc(c.totes[0] ?? "")}" placeholder="BIN026" style="width:160px"></label>
+      <label><span class="mono">Number of totes</span><input id="eCount" type="number" min="1" max="48" value="${c.totes.length || 25}" style="width:120px"></label>
+      <button class="ghost" id="eFill">Fill the list</button></div>
+    <label style="display:grid;gap:4px;margin-top:8px"><span class="mono">Tote barcodes in order (tote 1 first)</span><textarea id="eList" style="min-height:180px">${esc(c.totes.join("\n"))}</textarea></label>
+    <div id="eMsg" class="err"></div>
+    <div style="margin-top:10px;display:flex;justify-content:flex-end;gap:8px"><button class="signal" id="eTotes" ${c.free ? "" : "disabled"}>Check and save totes</button></div>`);
+  const list = () => $("eList").value.split(/[\s,]+/).map((x) => x.trim().toUpperCase()).filter(Boolean);
+  $("eList").oninput = () => { $("eN").textContent = `${list().length} TOTES`; };
+  $("eFill").onclick = () => {
+    const n = Number($("eCount").value), l = range($("eFirst").value, n);
+    if (!l || !(n >= 1 && n <= 48)) return ($("eMsg").textContent = "Enter a first barcode ending in a number (eg BIN026) and 1 to 48 totes.");
+    $("eList").value = l.join("\n"); $("eN").textContent = `${l.length} TOTES`; $("eMsg").textContent = "";
+  };
+  $("eSave").onclick = async () => {
+    const r = await rpc("wms_admin_save_cart", { p_cart_id: c.id, p_code: $("eCode").value.trim(), p_active: $("eOn").checked });
+    if (!r.ok) return ($("eMsg").textContent = errText(r));
+    closeModal(); loadCarts();
+  };
+  $("eTotes").onclick = async () => {
+    $("eMsg").textContent = "";
+    const l = list();
+    const pv = await rpc("wms_admin_set_cart_totes", { p_cart_id: c.id, p_barcodes: l });
+    if (!pv.ok) return ($("eMsg").textContent = errText(pv));
+    modal(`<h2>Confirm ${esc(pv.cart)} totes</h2>
+      <p style="font-size:18px;margin:10px 0">${esc(pv.cart)} will have <b>${pv.totes} totes</b>${pv.totes ? `: <b class="code">${esc(pv.first)}</b> → <b class="code">${esc(pv.last)}</b>` : " (pickers will scan loose totes)"}.</p>
+      ${pv.totes ? `<p>Pickers start this cart by scanning <b class="code">${esc(pv.first)}</b>.</p>` : ""}
+      ${pv.added.length ? `<p class="small" style="margin-top:8px"><b>Added:</b> ${pv.added.map(esc).join(", ")}</p>` : ""}
+      ${pv.made_loose.length ? `<p class="small" style="margin-top:4px"><b>Taken off (become loose totes):</b> ${pv.made_loose.map(esc).join(", ")}</p>` : ""}
+      <p class="small" style="margin-top:8px">Make sure the labels on the cart match this order.</p>
+      <div id="cMsg" class="err"></div>
+      <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="signal" id="cGo">Save totes</button></div>`);
+    $("cGo").onclick = async () => {
+      $("cGo").disabled = true;
+      const r = await rpc("wms_admin_set_cart_totes", { p_cart_id: c.id, p_barcodes: l, p_confirmed: true });
+      if (!r.ok) { $("cGo").disabled = false; return ($("cMsg").textContent = errText(r)); }
+      modal(`<h2>Saved</h2><p>${esc(r.cart)} now has ${r.totes} totes${r.totes ? ` (${esc(r.first)} → ${esc(r.last)})` : ""}.</p>`);
+      loadCarts();
+    };
+  };
+}
+
+// ---------------------------------------------------------------- locations
+let locs = [], locTotal = 0, locLoaded = false, zones = [], sel = new Set(), timer;
+const largs = (offset) => ({ p_search: $("lq").value.trim() || null, p_type: $("lType").value || null, p_zone: $("lZone").value || null,
+  p_status: $("lStatus").value, p_limit: 300, p_offset: offset });
+async function loadLocs(append = false) {
+  $("lErr").textContent = "";
+  try {
+    const d = await rpc("wms_admin_locations", largs(append ? locs.length : 0));
+    locLoaded = true; locs = append ? locs.concat(d.rows) : d.rows; locTotal = d.total;
+    if (!zones.length || !append) {
+      zones = d.zones;
+      const zo = zones.map((z) => `<option value="${esc(z.code)}">${esc(z.code)}${z.name && z.name !== z.code ? ` · ${esc(z.name)}` : ""}</option>`).join("");
+      const keep = (id, first) => { const v = $(id).value; $(id).innerHTML = first + zo; $(id).value = v; };
+      keep("lZone", `<option value="">All zones</option>`); keep("bZone", `<option value="">Zone: no change</option>`);
+      keep("addZone", `<option value="">Zone: from the row</option>`); $("addZone").innerHTML += `<option value="__new">+ New zone…</option>`;
+      $("typeChips").innerHTML = Object.entries(d.types).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${typeTag(t)} <span class="small">${fmt(n)}</span>`).join(" &nbsp; ");
+    }
+    renderLocs();
+  } catch (e) { $("lErr").textContent = e.message; }
+}
+function pickCell(r) {
+  const src = r.pick_allowed === null ? "" : `<div class="small">${r.pick_allowed ? "always (set)" : "never (set)"}</div>`;
+  return `<span class="${r.pickable ? "yes" : "no"}">${r.pickable ? "Yes" : "No"}</span>${src}`;
+}
+function renderLocs() {
+  $("lCount").textContent = `${fmt(locTotal)} LOCATION${locTotal === 1 ? "" : "S"}${locs.length < locTotal ? ` · SHOWING ${fmt(locs.length)}` : ""}`;
+  $("lMore").hidden = locs.length >= locTotal;
+  $("locRows").innerHTML = locs.length ? locs.map((r) => `<tr class="${r.active ? "" : "off"}">
+    <td><input type="checkbox" data-sel="${esc(r.code)}" ${sel.has(r.code) ? "checked" : ""}></td>
+    <td class="code">${esc(r.code)}</td><td>${typeTag(r.type)}</td><td>${esc(r.zone ?? "-")}</td><td>${pickCell(r)}</td>
+    <td class="num">${r.units ? fmt(r.units) : "-"}${r.reserved ? `<div class="small">${r.reserved} reserved</div>` : ""}</td><td class="num">${r.skus || "-"}</td>
+    <td>${r.active ? "Yes" : "<b>Off</b>"}</td></tr>`).join("") : `<tr><td colspan="8">No locations match.</td></tr>`;
+  $("selAll").checked = locs.length > 0 && locs.every((r) => sel.has(r.code));
+  showBulk();
+}
+function showBulk() { $("bulk").hidden = sel.size === 0; $("selN").textContent = `${fmt(sel.size)} selected`; }
+$("locRows").addEventListener("change", (e) => { const c = e.target.closest("[data-sel]"); if (!c) return; c.checked ? sel.add(c.dataset.sel) : sel.delete(c.dataset.sel); showBulk(); });
+$("selAll").onchange = () => { for (const r of locs) $("selAll").checked ? sel.add(r.code) : sel.delete(r.code); renderLocs(); };
+$("bClear").onclick = () => { sel.clear(); renderLocs(); };
+for (const id of ["lType", "lZone", "lStatus"]) $(id).addEventListener("change", () => loadLocs());
+$("lq").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => loadLocs(), 300); });
+$("lMore").onclick = () => loadLocs(true);
+
+async function bulk(args, what) {
+  const codes = [...sel];
+  modal(`<h2>${esc(what)}</h2><p style="font-size:18px;margin:10px 0">${esc(what)} for <b>${fmt(codes.length)}</b> location${codes.length === 1 ? "" : "s"}?</p>
+    <p class="small">${codes.slice(0, 30).map(esc).join(", ")}${codes.length > 30 ? ` and ${codes.length - 30} more` : ""}</p>
+    <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="signal" id="bGo">Yes, do it</button></div>`);
+  $("bGo").onclick = async () => {
+    $("bGo").disabled = true;
+    try {
+      const r = await rpc("wms_admin_update_locations", { p_codes: codes, ...args });
+      if (!r.ok) return modal(`<h2>Not changed</h2><p class="bad">${esc(r.error === "UNKNOWN_ZONE" ? `Zone ${r.zone} doesn't exist.` : r.error)}</p>`);
+      modal(`<h2>Done</h2><p>${fmt(r.updated)} location${r.updated === 1 ? "" : "s"} updated.</p>
+        ${r.blocked.length ? `<p class="bad" style="margin-top:8px"><b>${r.blocked.length} not changed:</b></p><ul style="margin:6px 0 0 18px">${r.blocked.slice(0, 40).map((b) => `<li><b class="code">${esc(b.code)}</b> ${esc(b.reason)}</li>`).join("")}</ul>` : ""}`);
+      sel.clear(); loadLocs();
+    } catch (e) { modal(`<h2>Error</h2><p class="bad">${esc(e.message)}</p>`); }
+  };
+}
+$("bApply").onclick = () => {
+  const a = { p_type: $("bType").value || null, p_zone: $("bZone").value || null, p_pick: $("bPick").value || null };
+  if (!a.p_type && !a.p_zone && !a.p_pick) return;
+  const parts = [a.p_type && `type to ${TYPES[a.p_type][0]}`, a.p_zone && `zone to ${a.p_zone}`, a.p_pick && `picking to "${$("bPick").selectedOptions[0].text.replace("Picking: ", "")}"`].filter(Boolean);
+  bulk(a, `Set ${parts.join(", ")}`);
+};
+$("bOff").onclick = () => bulk({ p_active: false }, "Switch off");
+$("bOn").onclick = () => bulk({ p_active: true }, "Switch on");
+
+// add locations
+$("addZone").onchange = () => { $("newZoneLbl").hidden = $("addZone").value !== "__new"; };
+$("rGo").onclick = () => {
+  const row = $("rRow").value.trim().toUpperCase(), pad = (v, ref) => String(v).padStart(Math.max(ref.length, 2), "0");
+  const s1 = $("rS1").value.trim(), s2 = $("rS2").value.trim() || s1, b1 = $("rB1").value.trim(), b2 = $("rB2").value.trim() || b1;
+  if (!row || !/^\d+$/.test(s1) || !/^\d+$/.test(s2) || (b1 && !/^\d+$/.test(b1)) || (b2 && !/^\d+$/.test(b2))) return ($("addErr").textContent = "Enter a row and shelf numbers (bins optional).");
+  const out = [];
+  for (let s = +s1; s <= +s2; s++) {
+    if (!b1) out.push(`${row}-${pad(s, s1)}`);
+    else for (let b = +b1; b <= +b2; b++) out.push(`${row}-${pad(s, s1)}-${pad(b, b1)}`);
+  }
+  if (out.length > 500) return ($("addErr").textContent = "That's more than 500 locations. Add them in smaller ranges.");
+  $("addErr").textContent = ""; $("addCodes").value = out.join("\n");
+};
+$("addPreview").onclick = async () => {
+  $("addErr").textContent = "";
+  const codes = $("addCodes").value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  if (!codes.length) return ($("addErr").textContent = "Add some location codes first.");
+  const zone = $("addZone").value === "__new" ? $("newZone").value.trim() : $("addZone").value;
+  const args = { p_codes: codes, p_type: $("addType").value, p_zone: zone || null };
+  try {
+    const pv = await rpc("wms_admin_add_locations", args);
+    if (!pv.ok) return ($("addErr").textContent = { BAD_ZONE: "Zone codes are letters and numbers only.", TOO_MANY: "Up to 500 at a time.", BAD_TYPE: "Pick a type." }[pv.error] ?? pv.error);
+    const bad = pv.locations.filter((l) => l.status === "bad_code"), have = pv.locations.filter((l) => l.status === "exists"),
+      on = pv.locations.filter((l) => l.status === "switch_on"), nw = pv.locations.filter((l) => l.status === "new");
+    modal(`<h2>Add locations</h2>
+      <p style="font-size:18px;margin:10px 0"><b>${nw.length}</b> new ${TYPES[args.p_type][0]} location${nw.length === 1 ? "" : "s"}${on.length ? `, <b>${on.length}</b> switched back on` : ""}.</p>
+      ${nw.length ? `<p class="small">${nw.slice(0, 40).map((l) => `${esc(l.code)}${l.kind === "floor" ? " (floor area)" : ""}`).join(", ")}${nw.length > 40 ? ` and ${nw.length - 40} more` : ""}</p>` : ""}
+      ${pv.new_rows.length ? `<p style="margin-top:8px"><b>New row${pv.new_rows.length > 1 ? "s" : ""}:</b> ${pv.new_rows.map(esc).join(", ")}. New rows go at the end of the pick walk.</p>` : ""}
+      ${pv.new_zone ? `<p style="margin-top:4px"><b>New zone:</b> ${esc(zone.toUpperCase())}</p>` : ""}
+      ${have.length ? `<p class="small" style="margin-top:8px">Already exist (left as they are): ${have.slice(0, 20).map((l) => esc(l.code)).join(", ")}${have.length > 20 ? "…" : ""}</p>` : ""}
+      ${bad.length ? `<p class="bad" style="margin-top:8px">Not valid codes (letters, numbers and - only): ${bad.map((l) => esc(l.code)).join(", ")}</p>` : ""}
+      <p class="small" style="margin-top:8px">New locations scan by their code (eg a label showing EA-09-01), the same as your existing labels.</p>
+      <div id="aMsg" class="err"></div>
+      <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="signal" id="aGo" ${nw.length + on.length ? "" : "disabled"}>Add them</button></div>`);
+    $("aGo").onclick = async () => {
+      $("aGo").disabled = true;
+      try {
+        const r = await rpc("wms_admin_add_locations", { ...args, p_confirmed: true });
+        if (!r.ok) { $("aGo").disabled = false; return ($("aMsg").textContent = r.error); }
+        modal(`<h2>Added</h2><p>${r.new} new location${r.new === 1 ? "" : "s"}${r.switched_on ? `, ${r.switched_on} switched back on` : ""}.</p>`);
+        $("addCodes").value = ""; $("lq").value = nw[0]?.code ?? on[0]?.code ?? ""; zones = []; loadLocs();
+      } catch (e) { $("aGo").disabled = false; $("aMsg").textContent = e.message; }
+    };
+  } catch (e) { $("addErr").textContent = e.message; }
+};
+
+let first = "carts"; try { first = localStorage.getItem("wms.settings.tab") || "carts"; } catch {}
+loadCarts(); tab(first);
+</script>
+</body>
+</html>

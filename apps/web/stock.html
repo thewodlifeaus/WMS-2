@@ -35,7 +35,7 @@
 <div class="modal" id="modal" hidden><div class="panel" id="mpanel"></div></div>
 
 <script type="module">
-import { sb, requireLogin, signOut, esc, fmt, clearLogin, canOpen } from "/js/app.js?v=4";
+import { sb, requireLogin, signOut, esc, fmt, clearLogin, canOpen } from "/js/app.js?v=5";
 const me = await requireLogin();
 if (me?.role === "display") location.href = "/tv.html";
 const $ = (id) => document.getElementById(id);

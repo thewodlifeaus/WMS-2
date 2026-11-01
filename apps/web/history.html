@@ -55,7 +55,7 @@
 </main>
 <div class="modal" id="modal" hidden><div class="panel"><div id="mbody"></div><div style="margin-top:12px;text-align:right"><button class="ghost" id="mclose">Close</button></div></div></div>
 <script type="module">
-import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=4";
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=5";
 const m = await requireLogin();
 if (m && !["admin", "supervisor"].includes(m.role)) location.href = "/index.html";
 const $ = (id) => document.getElementById(id);

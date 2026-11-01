@@ -326,9 +326,57 @@ async function findOrder() {
       <div><b>#${esc(o.order_number)}</b> ${esc(o.customer ?? "")} ${o.group ? grpBadge(o.group) : ""}
         <div class="where">${esc(o.where)}</div>
         <div class="split">${o.picked}/${o.units} picked${o.picker ? ` · picker ${esc(o.picker)}` : ""}${o.shared_with ? ` · shares tote with ${esc(o.shared_with)}` : ""}${o.is_held ? ` · ON HOLD${o.hold_reason ? ": " + esc(o.hold_reason) : ""}` : ""}</div></div>
-      <div>${o.session_id ? `<button class="ghost" data-open="${o.session_id}" data-num="${esc(o.order_number)}">Open cart</button>` : ""}</div></div>`).join("")
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${o.session_id ? `<button class="ghost" data-open="${o.session_id}" data-num="${esc(o.order_number)}">Open cart</button>` : ""}${boss && o.session_id && ["allocated","picking","picked"].includes(o.status) ? `<button class="ghost" data-remove="${o.order_id}" style="color:var(--red);border-color:var(--red)">Take off cart</button>` : ""}</div></div>`).join("")
     : `<p class="mono" style="margin-top:8px">No order matches "${esc(q)}".</p>`;
 }
+$("found").addEventListener("click", (e) => { const r = e.target.closest("[data-remove]"); if (r) removeBox(r.dataset.remove); });
+$("detail").addEventListener("click", async (e) => { const r = e.target.closest("[data-remove-num]"); if (!r) return;
+  const { data: hits } = await sb.rpc("wms_find_order", { p_text: r.dataset.removeNum });
+  const hit = (hits ?? []).find((h) => h.order_number === r.dataset.removeNum);
+  if (hit) removeBox(hit.order_id);
+});
+
+// take one order off its cart (customer cancelled or changed the order)
+async function removeBox(orderId) {
+  const { data: pv, error } = await sb.rpc("wms_remove_order_from_cart", { p_order_id: orderId, p_action: "cancel", p_reason: null });
+  if (error) { await check(error); return modal(`<h2>Could not check this order</h2><p class="bad">${esc(error.message)}</p>`); }
+  const ERRS = { AT_PACK_DESK: "This order is already at the pack desk (packing has started). Deal with it at the pack desk.", NOT_ON_A_CART: "This order isn't on a cart.", FORBIDDEN: "Only supervisors and admins can do this." };
+  if (!pv.ok) return modal(`<h2>Can't take this order off</h2><p class="bad">${esc(ERRS[pv.error] ?? pv.error)}</p>`);
+  let action = pv.cancelled_in_shopify ? "cancel" : "requeue";
+  const draw = () => {
+    $("mbody").innerHTML = `<h2>Take #${esc(pv.order_number)} off ${esc(pv.cart ?? "the cart")}?</h2>
+      <p class="mono">${pv.tote ? `TOTE ${esc(pv.tote)} · ` : ""}${pv.other_orders ? `${pv.other_orders} OTHER ORDER(S) STAY ON THE CART` : "THIS IS THE ONLY ORDER ON THE CART (THE CART WILL BE CLOSED)"}</p>
+      ${pv.put_back.length ? `<div class="msg warn" style="margin:8px 0"><b>${pv.units_put_back} item(s) already picked.</b> Take ${pv.put_back.length > 1 ? "them" : "it"} out of ${esc(pv.tote ?? "the tote")} and put back:</div>
+        <table><tr><th>Product</th><th class="num">Qty</th><th>Put back in</th></tr>${pv.put_back.map((x) => `<tr><td><b>${esc(x.sku)}</b> <span class="split">${esc(x.name ?? "")}${x.variant ? " " + esc(x.variant) : ""}</span></td><td class="num"><b>${x.qty}</b></td><td class="bin rb">${esc(x.to_bin)}</td></tr>`).join("")}</table>
+        <label style="display:grid;gap:4px;margin-top:8px"><span class="mono">Or put them all in one location instead (eg a returns shelf). Leave blank to put each back where it came from.</span><input id="retbin" placeholder="Location code (optional)"></label>`
+      : `<p style="margin:8px 0">Nothing has been picked for this order yet, so nothing needs putting back.</p>`}
+      ${pv.units_released ? `<p class="mono" style="margin-top:6px">${pv.units_released} ITEM(S) NOT YET PICKED: THEIR RESERVATION IS RELEASED</p>` : ""}
+      <div class="mono" style="margin-top:10px">WHAT HAPPENS TO THE ORDER?</div>
+      <div class="seg2" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">${[["requeue","Back to the queue (changed order, build again later)"],["hold","Put on hold"],["cancel","Cancelled (customer cancelled)"]].map(([k, l]) =>
+        `<button type="button" data-act="${k}" class="${action === k ? "" : "ghost"}" style="min-height:42px;font-size:14px">${l}</button>`).join("")}</div>
+      ${action === "cancel" ? `<p class="split" style="margin-top:4px">Cancels it in the WMS only. Cancel it in Shopify / ShipStation too if that hasn't happened.</p>` : ""}
+      <label style="display:grid;gap:4px;margin-top:10px"><span class="mono">Reason (required, saved with the stock history)</span><input id="remreason" placeholder="eg Customer cancelled, changed size"></label>
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end"><button class="signal" id="remgo" style="background:var(--red);border-color:var(--red)">Take it off the cart</button></div>`;
+    $("mbody").querySelectorAll("[data-act]").forEach((b) => b.onclick = () => { const rs = $("remreason").value, rb = $("retbin")?.value; action = b.dataset.act; draw(); $("remreason").value = rs; if ($("retbin")) $("retbin").value = rb ?? ""; });
+    $("retbin")?.addEventListener("input", () => { const v = $("retbin").value.trim().toUpperCase(); $("mbody").querySelectorAll(".rb").forEach((td, i) => { td.textContent = v || pv.put_back[i].to_bin; }); });
+    $("remgo").onclick = async () => {
+      const reason = $("remreason").value.trim();
+      if (!reason) { $("remreason").focus(); $("remreason").style.borderColor = "var(--red)"; return; }
+      $("remgo").disabled = true;
+      const { data: r, error } = await sb.rpc("wms_remove_order_from_cart", { p_order_id: orderId, p_action: action, p_reason: reason,
+        p_return_bin: $("retbin")?.value.trim() || null, p_confirmed: true });
+      if (error || !r.ok) { $("remgo").disabled = false; return alert(error?.message ?? (r.error === "UNKNOWN_BIN" ? `Location ${r.scanned} not recognised.` : r.error === "BIN_INACTIVE" ? `Location ${r.bin} is switched off.` : ERRS[r.error] ?? r.error)); }
+      modal(`<h2>#${esc(r.order_number)} is off ${esc(r.cart ?? "the cart")}</h2>
+        <p>${{ requeue: "It's back in the queue, ready to build onto a cart again.", hold: "It's on hold.", cancel: "It's cancelled in the WMS." }[r.action]}</p>
+        ${r.put_back.length ? `<div class="msg warn" style="margin-top:8px">Now take ${r.units_put_back} item(s) out of ${esc(r.tote ?? "the tote")} and put back: ${r.put_back.map((x) => `${esc(x.sku)} ×${x.qty} → ${esc(x.to_bin)}`).join(", ")}. The stock is already counted back there.</div>` : ""}
+        ${r.cart_closed ? `<p class="mono" style="margin-top:8px">${esc(r.cart ?? "THE CART")} HAD NO OTHER ORDERS AND IS NOW FREE.</p>` : `<p class="mono" style="margin-top:8px">${r.orders_left} ORDER(S) STILL ON ${esc(r.cart ?? "THE CART")}.</p>`}`);
+      findOrder(); loadCarts(); if (!$("detail").hidden && !r.cart_closed) { const sid = $("detail").dataset.sid; if (sid) openCart(sid); }
+      if (r.cart_closed) $("detail").hidden = true;
+    };
+  };
+  modal(""); draw();
+}
+
 $("found").addEventListener("click", async (e) => { const b = e.target.closest("[data-open]"); if (!b) return;
   await openCart(b.dataset.open);
   // highlight the order in the cart's order list
@@ -342,15 +390,15 @@ async function openCart(id) {
   const s = d.session; const [label] = SC[s.status] ?? [s.status];
   const canCancel = boss && ["draft", "assigned", "in_progress"].includes(s.status) && !d.picks.some((p) => p.picked > 0);
   const canRelease = boss && ["draft", "assigned", "in_progress"].includes(s.status) && s.picker;
-  $("detail").hidden = false;
+  $("detail").hidden = false; $("detail").dataset.sid = id;
   $("detail").innerHTML = `<div class="panel">
     <div class="kicker"><h2>${esc(s.cart ?? "Cart")} · ${label} · ${s.tote_slots ?? "-"} totes</h2><div>${grpBadge(s.group)}</div><span class="mono">ROUTE ${esc((s.route ?? "").toUpperCase())}</span></div>
     <div class="toolbar noprint"><span class="mono">Built ${new Date(s.created_at).toLocaleString("en-AU")}${s.created_by ? ` by ${esc(s.created_by)}` : ""}${s.picker ? ` · Picker ${esc(s.picker)}` : ""}${s.paused ? ` · ${s.picker ? "PAUSED" : "NEEDS A PICKER"} (${esc((s.pause_reason ?? "").replace(/_/g, " "))})` : ""}</span>
       <span style="flex:1"></span><button class="ghost" id="printcart">Print pick list</button>${canRelease ? `<button class="ghost" id="releasecart">Unassign ${esc(s.picker)}</button>` : ""}${canCancel ? `<button class="ghost" id="cancelcart" style="color:var(--red);border-color:var(--red)">Take cart apart</button>` : ""}</div>
     <h3 style="margin:10px 0 6px">Orders on this cart</h3>
-    <table><tr><th>Tote</th><th>Order</th><th>Customer</th><th>Service</th><th class="num">Picked</th><th>Status</th></tr>
+    <table><tr><th>Tote</th><th>Order</th><th>Customer</th><th>Service</th><th class="num">Picked</th><th>Status</th>${boss ? `<th class="noprint"></th>` : ""}</tr>
       ${d.orders.map((o) => `<tr><td class="bin">${esc(o.tote ?? (o.slot ? `Tote ${o.slot}` : "scan at start"))}</td><td><b>#${esc(o.order_number)}</b>${o.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}${o.is_held ? ` <span class="chip amber">ON HOLD</span>` : ""}</td>
-        <td>${esc(o.customer ?? "")}</td><td>${esc(o.service ?? "")}</td><td class="num">${o.picked ?? 0}/${o.units ?? 0}</td><td>${esc(o.status.replace("_", " "))}</td></tr>`).join("")}</table>
+        <td>${esc(o.customer ?? "")}</td><td>${esc(o.service ?? "")}</td><td class="num">${o.picked ?? 0}/${o.units ?? 0}</td><td>${esc(o.status.replace("_", " "))}</td>${boss ? `<td class="noprint"><button class="ghost" data-remove-num="${esc(o.order_number)}" style="min-height:34px;font-size:13px;padding:0 10px">Take off cart</button></td>` : ""}</tr>`).join("")}</table>
     <h3 style="margin:14px 0 6px">Pick list (walking order)</h3>
     <table class="picks"><tr><th class="num">#</th><th>Location</th><th></th><th>Product</th><th class="num">Qty</th><th class="num">Picked</th><th>Into tote / order</th></tr>
       ${d.picks.map((p) => `<tr><td class="num">${p.seq}</td><td><span class="bin">${esc(p.bin)}</span>${p.bin_type !== "pick" ? `<div class="split">${esc(p.bin_type.toUpperCase())}</div>` : ""}</td>

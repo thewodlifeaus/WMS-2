@@ -59,7 +59,7 @@ const tz = "Australia/Adelaide";
 const ymd = (d) => d.toLocaleDateString("en-CA", { timeZone: tz });
 $("to").value = ymd(new Date()); $("from").value = ymd(new Date(Date.now() - 6 * 864e5));
 
-const TYPES = { adjust: ["Adjust", "#2f5bd3"], move_in: ["Move", "#00796b"], move_out: ["Move out", "#00796b"], pick: ["Pick", "#111"], unpick: ["Un-pick", "#757575"],
+const TYPES = { adjust: ["Adjust", "#2f5bd3"], move_in: ["Move", "#00796b"], move_out: ["Move out", "#00796b"], pick: ["Pick", "#111"], unpick: ["Put back (off cart)", "#e65100"],
   receive: ["Receive", "#6a1b9a"], cycle_count: ["Count", "#c2185b"], ship: ["Ship", "#757575"], return: ["Return", "#e65100"] };
 const typeLabel = (r) => r.type === "adjust" && r.ref === "pick_task" ? ["Pick count fix", "#c2185b"] : r.type === "move_in" && r.ref === "merge" ? ["Merge", "#00796b"] : TYPES[r.type] ?? [r.type, "#757575"];
 const reasonText = (r) => (r.reason ?? "").replace(/^(Stock tool|Pick count fix): /, "");

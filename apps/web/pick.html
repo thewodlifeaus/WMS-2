@@ -165,6 +165,10 @@ async function doPick(t, barcode, qty) {
     bad(); return home(r.error === "NOT_YOUR_CART" ? `${state.cart} has been given to ${r.picker ?? "another picker"}. Pick another cart.`
                                                    : `${state.cart} was taken off you by a supervisor. Scan it again to carry on, or pick another cart.`, "bad");
   }
+  if (!r.ok && (r.error === "TASK_NOT_FOUND" || r.error === "NOT_CURRENT_TASK")) {
+    bad(); binOk = false; await refresh();
+    return msg("That stop changed (a supervisor may have taken an order off this cart). Carry on from here.", "warn");
+  }
   if (!r.ok) {
     bad();
     return msg({ WRONG_ITEM: `WRONG ITEM. You scanned ${r.scanned_sku}. Need ${r.expected_sku}.`, UNKNOWN_BARCODE: "Barcode not recognised. Scan the product barcode.",

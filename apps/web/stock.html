@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/brand.css?v=3">
-<link rel="stylesheet" href="/css/tablet.css?v=5">
+<link rel="stylesheet" href="/css/tablet.css?v=6">
 <style>
   .menu{display:grid;gap:10px}
   .menu button{min-height:84px;font-size:22px;text-align:left;padding:0 20px;display:flex;justify-content:space-between;align-items:center}
@@ -275,11 +275,34 @@ function move(fromCode, pre) {
         good(); m.product = p; m.sku = p.sku; m.max = here.free; m.reserved = here.allocated; return draw();
       }
       if (!m.qty) return;
-      const r = await rpc("wms_move_stock", { p_from_bin: m.from, p_product_barcode: m.sku, p_qty: m.qty, p_to_bin: v });
-      if (!r.ok) { bad(); return draw(r.error === "INSUFFICIENT_STOCK" ? `Only ${r.available} free in ${m.from}.` : (ERR[r.error] ?? r.error) + (r.scanned ? ` (${r.scanned})` : ""), "bad"); }
-      done();
-      const okMsg = `✓ Moved ${r.qty} × ${r.sku}: ${r.from} (now ${r.from_after}) → ${r.to} (now ${r.to_after}).`;
-      pre?.back ? showItem(pre.back, okMsg, "good") : menu(okMsg, "good");
+      // check the destination first, then ask the person to confirm the move
+      const to = await rpc("wms_bin_contents", { p_bin: v });
+      if (!to.ok) { bad(); return draw(`${v}: location not recognised.`, "bad"); }
+      if (to.bin.code === m.from) { bad(); return draw("That's the same location you're moving from.", "bad"); }
+      if (!to.bin.active) { bad(); return draw(`${to.bin.code} is switched off.`, "bad"); }
+      good();
+      const already = to.items.find((i) => i.sku === m.sku)?.on_hand ?? 0;
+      $("mpanel").innerHTML = `<h2>Confirm the move</h2>
+        <div class="card" style="display:grid;gap:10px">
+          <div style="font-size:22px">Move <b style="font-size:34px">${m.qty}</b> × <b>${esc(m.sku)}</b></div>
+          <div class="pvar" style="font-size:16px">${esc(m.product?.name ?? "")}${m.product?.variant ? " · " + esc(m.product.variant) : ""}</div>
+          <div class="mvrow"><div><span class="step">From</span><b>${esc(m.from)}</b><span class="split">${m.max} free → ${m.max - m.qty} after</span></div>
+            <div class="arrow">→</div>
+            <div><span class="step">To</span><b>${esc(to.bin.code)}</b><span class="split">${already} now → ${already + m.qty} after</span></div></div></div>
+        <div class="btns"><button class="ghost" id="mvno">Cancel</button><button class="signal" id="mvyes">Yes, move ${m.qty}</button></div>`;
+      $("modal").hidden = false;
+      $("mvno").onclick = () => { $("modal").hidden = true; draw("Move not done. Scan the location you're putting it into, or Back a step."); };
+      $("mvyes").onclick = async () => {
+        $("mvyes").disabled = true;
+        try {
+          const r = await rpc("wms_move_stock", { p_from_bin: m.from, p_product_barcode: m.sku, p_qty: m.qty, p_to_bin: to.bin.code });
+          $("modal").hidden = true;
+          if (!r.ok) { bad(); return draw(r.error === "INSUFFICIENT_STOCK" ? `Only ${r.available} free in ${m.from}.` : (ERR[r.error] ?? r.error) + (r.scanned ? ` (${r.scanned})` : ""), "bad"); }
+          done();
+          const okMsg = `✓ Moved ${r.qty} × ${r.sku}: ${r.from} (now ${r.from_after}) → ${r.to} (now ${r.to_after}).`;
+          pre?.back ? showItem(pre.back, okMsg, "good") : menu(okMsg, "good");
+        } catch (e) { $("modal").hidden = true; bad(); draw(e.message, "bad"); }
+      };
     } catch (e) { bad(); draw(e.message, "bad"); }
   };
   draw(pre ? "" : fromCode ? "Scan the product." : "");

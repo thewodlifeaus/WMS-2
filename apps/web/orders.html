@@ -384,11 +384,39 @@ $("found").addEventListener("click", async (e) => { const b = e.target.closest("
   for (const tr of $("detail").querySelectorAll("tr")) if (re.test(tr.cells?.[1]?.textContent.trim() ?? "")) { tr.style.background = "#fff3c4"; tr.style.outline = "3px solid var(--orange)"; tr.scrollIntoView({ block: "center" }); }
 });
 
+// take a whole cart apart: every order back to the queue, picked items back on the shelf
+async function takeApartBox(id) {
+  const { data: pv, error } = await sb.rpc("wms_take_cart_apart", { p_session_id: id });
+  if (error || !pv.ok) { await check(error); return modal(`<h2>Can't take this cart apart</h2><p class="bad">${esc(error?.message ?? pv.error)}</p>`); }
+  modal(`<h2>Take ${esc(pv.cart ?? "this cart")} apart?</h2>
+    <p>All <b>${pv.orders}</b> order(s) go back to the queue, ready to build onto another cart.${pv.picker ? ` <b>${esc(pv.picker)}</b> is taken off it.` : ""}</p>
+    ${pv.at_pack_desk.length ? `<p class="warn">Already at the pack desk, left alone: #${pv.at_pack_desk.map(esc).join(", #")}</p>` : ""}
+    ${pv.put_back.length ? `<div class="msg warn" style="margin:8px 0"><b>${pv.units_put_back} item(s) already picked.</b> Take them out of the totes and put back:</div>
+      <table><tr><th>Tote</th><th>Product</th><th class="num">Qty</th><th>Put back in</th></tr>${pv.put_back.map((x) => `<tr><td class="bin">${esc(x.tote ?? "-")}</td><td><b>${esc(x.sku)}</b> <span class="split">#${esc(x.order_number)}</span></td><td class="num"><b>${x.qty}</b></td><td class="bin rb">${esc(x.to_bin)}</td></tr>`).join("")}</table>
+      <label style="display:grid;gap:4px;margin-top:8px"><span class="mono">Or put them all in one location instead (eg a returns shelf). Leave blank to put each back where it came from.</span><input id="tabin" placeholder="Location code (optional)"></label>`
+    : `<p class="mono" style="margin-top:6px">NOTHING HAS BEEN PICKED YET, SO NOTHING NEEDS PUTTING BACK.</p>`}
+    <label style="display:grid;gap:4px;margin-top:10px"><span class="mono">Reason (optional)</span><input id="tareason" placeholder="eg Rebuilding carts"></label>
+    <div style="margin-top:12px;display:flex;justify-content:flex-end"><button id="tago" style="background:var(--red);border-color:var(--red);color:#fff">Take ${esc(pv.cart ?? "cart")} apart</button></div>`);
+  $("tabin")?.addEventListener("input", () => { const v = $("tabin").value.trim().toUpperCase(); $("mbody").querySelectorAll(".rb").forEach((td, i) => { td.textContent = v || pv.put_back[i].to_bin; }); });
+  $("tago").onclick = async () => {
+    $("tago").disabled = true;
+    const { data: r, error } = await sb.rpc("wms_take_cart_apart", { p_session_id: id, p_reason: $("tareason").value.trim() || null,
+      p_return_bin: $("tabin")?.value.trim() || null, p_confirmed: true });
+    if (error || !r.ok) { $("tago").disabled = false; return alert(error?.message ?? (r.error === "UNKNOWN_BIN" ? `Location ${r.scanned} not recognised.` : r.error === "BIN_INACTIVE" ? `Location ${r.bin} is switched off.` : r.error)); }
+    modal(`<h2>${esc(r.cart ?? "Cart")} taken apart</h2>
+      <p><b>${r.orders_back_in_queue.length}</b> order(s) are back in the queue.</p>
+      ${r.put_back.length ? `<div class="msg warn" style="margin-top:8px">Now put back ${r.units_put_back} item(s): ${r.put_back.map((x) => `${esc(x.sku)} ×${x.qty} → ${esc(x.to_bin)}`).join(", ")}. The stock is already counted back there.</div>` : ""}
+      ${r.kept.length ? `<p class="warn" style="margin-top:8px">Left alone: ${r.kept.map((k) => `#${esc(k.order_number)} (${esc(k.why === "AT_PACK_DESK" ? "at the pack desk" : k.why)})`).join(", ")}</p>` : ""}`);
+    $("detail").hidden = true; loadCarts(); loadOrders();
+  };
+}
+
 async function openCart(id) {
   const { data: d, error } = await sb.rpc("wms_cart_detail", { p_session_id: id });
   if (error || !d) { await check(error); return; }
   const s = d.session; const [label] = SC[s.status] ?? [s.status];
-  const canCancel = boss && ["draft", "assigned", "in_progress"].includes(s.status) && !d.picks.some((p) => p.picked > 0);
+  // any open cart, or a finished cart whose orders are still waiting to be packed
+  const canCancel = boss && (["draft", "assigned", "in_progress"].includes(s.status) || (s.status === "completed" && d.orders.some((o) => ["picked", "picking"].includes(o.status))));
   const canRelease = boss && ["draft", "assigned", "in_progress"].includes(s.status) && s.picker;
   $("detail").hidden = false; $("detail").dataset.sid = id;
   $("detail").innerHTML = `<div class="panel">
@@ -414,12 +442,7 @@ async function openCart(id) {
     if (error || !r.ok) { alert(error?.message ?? ({ FORBIDDEN: "Only supervisors and admins can do this.", NO_PICKER: "No picker on this cart." }[r.error] ?? r.error)); return; }
     loadCarts(); openCart(id);
   };
-  if (canCancel) $("cancelcart").onclick = async () => {
-    if (!confirm(`Take ${s.cart} apart? Its orders go back to Ready and the stock is released.`)) return;
-    const { data: r, error } = await sb.rpc("wms_cancel_pick_session", { p_session_id: id });
-    if (error || !r.ok) { alert(error?.message ?? r.hint ?? r.error); return; }
-    $("detail").hidden = true; loadCarts();
-  };
+  if (canCancel) $("cancelcart").onclick = () => takeApartBox(id);
   $("detail").scrollIntoView({ behavior: "smooth" });
 }
 if (location.hash === "#carts") tab(2);

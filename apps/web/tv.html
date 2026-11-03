@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Warehouse floor · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  html,body{height:100%;overflow:hidden}
+  body{font-size:clamp(14px,1.05vw,22px)}
+  .tv{display:grid;grid-template-rows:auto auto 1fr;gap:1.1vh;height:calc(100vh - 7vh);padding:1.2vh 1.4vw}
+  .bar{height:7vh;padding:0 1.4vw}.bar .logo{font-size:2.2em}
+  .clock{font:600 1.6em "IBM Plex Mono",monospace;color:#fff}
+  .row{display:grid;gap:1.1vw}
+  .r1{grid-template-columns:1fr 1fr 1.25fr}
+  .r2{grid-template-columns:repeat(5,1fr)}
+  .r3{grid-template-columns:.85fr .85fr 1.3fr 1.5fr;min-height:0}
+  .panel{padding:1.2vh 1vw;min-height:0}
+  .kicker{margin-bottom:.8vh}.kicker h2{font-size:.85em}
+  .dial{display:flex;flex-direction:column;align-items:center}
+  .dial svg{width:100%;max-height:22vh}
+  .dial .val{font:900 3em/1 Archivo;color:var(--ink);margin-top:.3vh;display:flex;align-items:center;gap:.5vw}
+  .legend{font:600 .7em "IBM Plex Mono",monospace;color:var(--muted);letter-spacing:.06em;margin-top:.5vh;text-align:center}
+  .big{font:900 4.2em/1 Archivo;color:var(--ink)}
+  .split{display:grid;grid-template-columns:repeat(3,1fr);gap:.6vw;margin-top:1vh}
+  .split div{background:var(--surface);border:1px solid var(--rule);padding:.8vh .6vw}
+  .split b{display:block;font:900 1.8em/1.1 Archivo;color:var(--ink)}
+  .kpi .now{font:900 2.8em/1 Archivo;color:var(--ink)}
+  .cmp{display:flex;justify-content:space-between;gap:.4vw;margin-top:.8vh;font-size:.82em}
+  .cmp span{font-variant-numeric:tabular-nums}
+  .up{color:var(--green);font-weight:800}.down{color:var(--red);font-weight:800}.flat{color:var(--muted);font-weight:800}
+  .lead{display:flex;align-items:baseline;justify-content:space-between;background:var(--ink);color:#fff;padding:1vh .8vw;margin-bottom:.8vh}
+  .lead b{font:900 1.9em/1 Archivo}.lead span{font:900 1.9em/1 Archivo;color:var(--orange)}
+  ol{list-style:none}ol li{display:flex;justify-content:space-between;padding:.55vh .3vw;border-bottom:1px solid var(--rule)}
+  .chart svg{width:100%;height:100%}
+  .rate{display:flex;align-items:baseline;gap:.6vw}.rate b{font:900 3em/1 Archivo;color:var(--ink)}
+  .rcmp{display:flex;justify-content:space-between;gap:.4vw;font-size:.8em;margin-top:.4vh}
+  .stale{background:var(--orange);color:#111;padding:.4vh .8vw;font-weight:800}
+</style>
+</head>
+<body>
+<div class="bar"><span class="logo">TWL</span><span class="mono" id="day" style="color:#ddd;font-size:1em"></span><span style="display:flex;align-items:center;gap:16px"><span class="clock" id="clock"></span><button class="ghost" id="out" style="color:#fff;border-color:#888;min-height:36px;font-size:14px;padding:0 12px;opacity:.7">Log out</button></span></div>
+<main class="tv">
+  <section class="row r1">
+    <div class="panel dial"><div class="kicker" style="width:100%"><h2>Score vs last working day</h2><span class="mono" id="lwdLabel">FL.01</span></div><svg id="dial1" viewBox="0 0 200 118"></svg><div class="val" id="s1">-</div><div class="legend">RED UNDER 85 · AMBER 85-99 · GREEN 100+ (100 = SAME PACE)</div></div>
+    <div class="panel dial"><div class="kicker" style="width:100%"><h2>Score vs same day last week</h2><span class="mono" id="lwLabel">FL.02</span></div><svg id="dial2" viewBox="0 0 200 118"></svg><div class="val" id="s2">-</div><div class="legend">PICKED + PACKED + LABELS, TODAY SO FAR VS SAME TIME</div></div>
+    <div class="panel"><div class="kicker"><h2>Still to pick</h2><span class="mono">FL.03</span></div>
+      <div class="big" id="toPick">-</div><div class="mono">ITEMS WAITING</div>
+      <div class="split"><div><b id="toPickOrders">-</b><span class="mono">ORDERS TO PICK</span></div><div><b id="toPack">-</b><span class="mono">ORDERS TO PACK</span></div><div><b id="onHold">-</b><span class="mono">ON HOLD</span></div></div>
+    </div>
+  </section>
+  <section class="row r2" id="kpis"></section>
+  <section class="row r3">
+    <div class="panel"><div class="kicker"><h2>Top picker</h2><span class="mono">ITEMS PICKED</span></div><div id="pickers"></div></div>
+    <div class="panel"><div class="kicker"><h2>Top packer</h2><span class="mono">ITEMS PACKED</span></div><div id="packers"></div></div>
+    <div class="panel chart" style="display:flex;flex-direction:column"><div class="kicker"><h2>Items picked by hour</h2><span class="mono"><span style="color:var(--ink)">■</span> TODAY &nbsp;<span style="color:var(--rule)">■</span> <span class="lwdShort">LAST WORKING DAY</span></span></div><div style="flex:1;min-height:0"><svg id="chart" preserveAspectRatio="none"></svg></div></div>
+    <div class="panel chart" style="display:flex;flex-direction:column"><div class="kicker"><h2>Items packed per hour</h2><span class="mono"><span style="color:var(--orange)">■</span> TODAY &nbsp;<span style="color:var(--rule)">■</span> <span class="lwdShort">LAST WORKING DAY</span></span></div>
+      <div class="rate"><b id="prToday">-</b><span class="mono">PER HOUR TODAY</span><span id="prDelta" style="margin-left:auto;font-size:1.3em"></span></div>
+      <div class="rcmp"><span class="mono" id="prSame">-</span><span class="mono" id="prFull">-</span></div>
+      <div class="rcmp"><span class="mono" id="prHour">-</span><span id="prHourDelta"></span></div>
+      <div style="flex:1;min-height:0;margin-top:.6vh"><svg id="chartPacked" preserveAspectRatio="none"></svg></div></div>
+  </section>
+</main>
+<script type="module">
+import { sb, requireLogin, fmt, esc, signOut } from "/js/app.js?v=5";
+document.getElementById("out").onclick = () => { if (confirm("Log out of the TV dashboard?")) signOut(); };
+await requireLogin();
+const $ = (id) => document.getElementById(id);
+const tz = "Australia/Adelaide";
+const dayName = (d) => new Date(d + "T12:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" }).toUpperCase();
+setInterval(() => { $("clock").textContent = new Date().toLocaleTimeString("en-AU", { timeZone: tz, hour: "numeric", minute: "2-digit" }); }, 1000);
+
+const band = (v) => v == null ? ["var(--muted)", "NO DATA"] : v >= 100 ? ["var(--green)", "GREEN"] : v >= 85 ? ["var(--amber)", "AMBER"] : ["var(--red)", "RED"];
+function arc(v0, v1, max = 200) { // semicircle from 0 (left) to max (right)
+  const a = (v) => Math.PI * (1 - Math.min(v, max) / max), r = 80, cx = 100, cy = 100;
+  const p = (v) => [cx + r * Math.cos(a(v)), cy - r * Math.sin(a(v))];
+  const [x0, y0] = p(v0), [x1, y1] = p(v1);
+  return `M${x0},${y0} A${r},${r} 0 0 1 ${x1},${y1}`;
+}
+function dial(svg, v) {
+  const [col] = band(v);
+  const needle = Math.PI * (1 - Math.min(v ?? 0, 200) / 200);
+  svg.innerHTML = `
+    <path d="${arc(0, 85)}" stroke="var(--red)" stroke-width="16" fill="none" opacity=".25"/>
+    <path d="${arc(85, 100)}" stroke="var(--amber)" stroke-width="16" fill="none" opacity=".3"/>
+    <path d="${arc(100, 200)}" stroke="var(--green)" stroke-width="16" fill="none" opacity=".25"/>
+    ${v == null ? "" : `<path d="${arc(0, Math.max(v, 0.5))}" stroke="${col}" stroke-width="16" fill="none"/>
+    <line x1="100" y1="100" x2="${100 + 62 * Math.cos(needle)}" y2="${100 - 62 * Math.sin(needle)}" stroke="var(--ink)" stroke-width="3"/>`}
+    <circle cx="100" cy="100" r="5" fill="var(--ink)"/>
+    <text x="14" y="116" font-size="9" font-family="IBM Plex Mono" fill="var(--muted)">0</text>
+    <text x="92" y="12" font-size="9" font-family="IBM Plex Mono" fill="var(--muted)">100</text>
+    <text x="172" y="116" font-size="9" font-family="IBM Plex Mono" fill="var(--muted)">200</text>`;
+}
+function delta(now, then) {
+  if (!then) return `<span class="flat">${then === 0 && now > 0 ? "NEW" : "-"}</span>`;
+  const d = Math.round((now - then) / then * 100);
+  return `<span class="${d > 0 ? "up" : d < 0 ? "down" : "flat"}">${d > 0 ? "▲" : d < 0 ? "▼" : "="} ${Math.abs(d)}%</span>`;
+}
+const KPIS = [["items_picked","Items picked"],["items_packed","Items packed"],["labels","Labels generated"],["orders_shipped","Orders shipped"],["orders_received","Orders received"]];
+function leaders(list) {
+  if (!list.length) return `<p class="mono">[NO SCANS YET TODAY]</p>`;
+  const [top, ...rest] = list;
+  return `<div class="lead"><b>${esc(top.name)}</b><span>${fmt(top.units)}</span></div><ol>${rest.map((r, i) => `<li><span>${i + 2}. ${esc(r.name)}</span><b>${fmt(r.units)}</b></li>`).join("")}</ol>`;
+}
+function chart(rows, id = "chart", col = "var(--ink)") {
+  const svg = $(id), W = 600, H = 200, max = Math.max(1, ...rows.flatMap(r => [r.today, r.last_working_day]));
+  const bw = W / rows.length;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H + 22}`);
+  svg.innerHTML = rows.map((r, i) => {
+    const h1 = r.last_working_day / max * H, h2 = r.today / max * H, x = i * bw;
+    const label = r.hour > 12 ? r.hour - 12 + "P" : r.hour + (r.hour === 12 ? "P" : "A");
+    return `<rect x="${x + bw * .12}" y="${H - h1}" width="${bw * .36}" height="${h1}" fill="var(--rule)"/>
+            <rect x="${x + bw * .5}" y="${H - h2}" width="${bw * .36}" height="${h2}" fill="${col}"/>
+            <text x="${x + bw / 2}" y="${H + 16}" text-anchor="middle" font-size="12" font-family="IBM Plex Mono" fill="var(--muted)">${label}</text>`;
+  }).join("") + `<line x1="0" y1="${H}" x2="${W}" y2="${H}" stroke="var(--ink)"/>`;
+}
+async function load() {
+  const { data: m, error } = await sb.rpc("wms_floor_metrics");
+  if (error) { $("day").innerHTML = `<span class="stale">CONNECTION PROBLEM, RETRYING</span>`; return; }
+  $("day").textContent = `WAREHOUSE FLOOR · ${dayName(m.today)} · UPDATED ${new Date(m.generated_at).toLocaleTimeString("en-AU", { timeZone: tz, hour: "numeric", minute: "2-digit" })}`;
+  $("lwdLabel").textContent = dayName(m.last_working_day); $("lwLabel").textContent = dayName(m.same_day_last_week);
+  const s1 = m.score.vs_last_working_day, s2 = m.score.vs_last_week;
+  dial($("dial1"), s1); dial($("dial2"), s2);
+  $("s1").innerHTML = s1 == null ? "-" : `${s1} <span class="chip ${band(s1)[1].toLowerCase()}">${band(s1)[1]}</span>`;
+  $("s2").innerHTML = s2 == null ? "-" : `${s2} <span class="chip ${band(s2)[1].toLowerCase()}">${band(s2)[1]}</span>`;
+  $("toPick").textContent = fmt(m.to_pick.items); $("toPickOrders").textContent = fmt(m.to_pick.orders);
+  $("toPack").textContent = fmt(m.to_pick.to_pack); $("onHold").textContent = fmt(m.to_pick.on_hold);
+  $("kpis").innerHTML = KPIS.map(([k, label]) => {
+    const now = m.now[k], p = m.last_working_day_same_time[k], w = m.last_week_same_time[k];
+    return `<div class="panel kpi"><div class="kicker"><h2>${label}</h2><span class="mono">TODAY</span></div><div class="now">${fmt(now)}</div>
+      <div class="cmp"><span class="mono">VS ${dayName(m.last_working_day).split(" ")[0].replace(",", "")} ${fmt(p)}</span>${delta(now, p)}</div>
+      <div class="cmp"><span class="mono">VS LAST WK ${fmt(w)}</span>${delta(now, w)}</div></div>`;
+  }).join("");
+  $("pickers").innerHTML = leaders(m.top_pickers); $("packers").innerHTML = leaders(m.top_packers);
+  chart(m.hourly);
+  // items packed per hour vs last working day
+  const pr = m.pack_rate, lwd = dayName(m.last_working_day).split(" ")[0].replace(",", "");
+  document.querySelectorAll(".lwdShort").forEach((e) => { e.textContent = lwd; });
+  if (pr) {
+    const t = pr.today.per_hour, ps = pr.last_working_day_same_time.per_hour, pf = pr.last_working_day_full.per_hour;
+    $("prToday").textContent = t == null ? "-" : fmt(t);
+    $("prDelta").innerHTML = t == null || ps == null ? "" : delta(t, ps);
+    $("prSame").textContent = `${lwd} BY NOW ${ps == null ? "-" : fmt(ps) + "/H"}`;
+    $("prFull").textContent = `${lwd} FULL DAY ${pf == null ? "-" : fmt(pf) + "/H"}`;
+    const h = pr.this_hour, hl = (x) => x > 12 ? x - 12 + "PM" : x + (x === 12 ? "PM" : "AM");
+    $("prHour").textContent = `${hl(h.hour)} SO FAR ${fmt(h.today)} · ${lwd} ${hl(h.hour)}-${hl(h.hour + 1)} ${fmt(h.last_working_day)}`;
+    $("prHourDelta").innerHTML = "";
+    chart(m.hourly_packed ?? [], "chartPacked", "var(--orange)");
+  }
+}
+await load();
+setInterval(load, 60_000);
+// reload the page every 6 hours so updates to this screen are picked up automatically
+setTimeout(() => location.reload(), 6 * 3600_000);
+</script>
+</body>
+</html>

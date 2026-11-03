@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stock history · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  .wrap{max-width:1500px}
+  .filters{display:grid;grid-template-columns:150px 150px 1fr 1fr 2fr auto;gap:8px;align-items:end;margin-bottom:10px}
+  .filters label{display:grid;gap:4px}
+  .filters input,.filters select{min-height:42px}
+  td{font-size:14px;vertical-align:top}
+  .t{display:inline-block;font:800 11px Archivo,sans-serif;letter-spacing:.04em;padding:3px 7px;color:#fff;white-space:nowrap}
+  .chg{font:900 18px "IBM Plex Mono",monospace;text-align:right;white-space:nowrap}
+  .plus{color:var(--green)} .minus{color:var(--red)}
+  .sku{font:600 13px "IBM Plex Mono",monospace;color:var(--muted)}
+  .loc{font:600 14px "IBM Plex Mono",monospace;color:var(--ink);white-space:nowrap}
+  .small{font-size:12px;color:var(--muted)}
+  .sum{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  @media (max-width:1000px){.filters{grid-template-columns:1fr 1fr}}
+  tr.undone td{color:var(--muted)} tr.undone td .chg, tr.undone .loc{text-decoration:line-through}
+  .undo{min-height:34px;font-size:13px;padding:0 10px}
+  .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
+  .modal .panel{max-width:560px;width:100%}
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc">STOCK HISTORY</span><button class="ghost" id="out" style="border-color:#fff">Sign out</button></div>
+<main class="wrap">
+  <div class="kicker"><h2>Every stock change, who made it and why</h2><span class="mono">LOG.01</span></div>
+  <div class="filters">
+    <label><span class="mono">From</span><input type="date" id="from"></label>
+    <label><span class="mono">To</span><input type="date" id="to"></label>
+    <label><span class="mono">Person</span><select id="who"><option value="">Everyone</option></select></label>
+    <label><span class="mono">Type</span><select id="kind">
+      <option value="changes">All changes (not picks)</option>
+      <option value="adjust">Adds / removes / count fixes</option>
+      <option value="move">Moves and merges</option>
+      <option value="pick">Picks</option>
+      <option value="receive">Receiving (POs)</option>
+      <option value="count">Cycle counts</option>
+      <option value="all">Everything</option></select></label>
+    <label><span class="mono">Search</span><input id="q" placeholder="SKU, product, location or reason"></label>
+    <button class="ghost" id="csv">Download CSV</button>
+  </div>
+  <div class="sum"><span class="mono" id="count"></span><span id="err" class="err"></span></div>
+  <div style="overflow-x:auto"><table>
+    <thead><tr><th>When</th><th>Who</th><th>Type</th><th>Product</th><th>Location</th><th class="num">Change</th><th class="num">Now in location</th><th>Reason / order</th><th></th></tr></thead>
+    <tbody id="rows"><tr><td colspan="9" class="mono">Loading…</td></tr></tbody>
+  </table></div>
+  <div style="text-align:center;margin:12px 0"><button class="ghost" id="more" hidden>Show more</button></div>
+  <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
+</main>
+<div class="modal" id="modal" hidden><div class="panel"><div id="mbody"></div><div style="margin-top:12px;text-align:right"><button class="ghost" id="mclose">Close</button></div></div></div>
+<script type="module">
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=5";
+const m = await requireLogin();
+if (m && !["admin", "supervisor"].includes(m.role)) location.href = "/index.html";
+const $ = (id) => document.getElementById(id);
+$("out").onclick = signOut;
+const tz = "Australia/Adelaide";
+const ymd = (d) => d.toLocaleDateString("en-CA", { timeZone: tz });
+$("to").value = ymd(new Date()); $("from").value = ymd(new Date(Date.now() - 6 * 864e5));
+
+const TYPES = { adjust: ["Adjust", "#2f5bd3"], move_in: ["Move", "#00796b"], move_out: ["Move out", "#00796b"], pick: ["Pick", "#111"], unpick: ["Put back (off cart)", "#e65100"],
+  receive: ["Receive", "#6a1b9a"], cycle_count: ["Count", "#c2185b"], ship: ["Ship", "#757575"], return: ["Return", "#e65100"] };
+const typeLabel = (r) => r.ref === "undo" ? ["Undo", "#555"] : r.type === "adjust" && r.ref === "pick_task" ? ["Pick count fix", "#c2185b"] : r.type === "move_in" && r.ref === "merge" ? ["Merge", "#00796b"] : TYPES[r.type] ?? [r.type, "#757575"];
+const reasonText = (r) => (r.reason ?? "").replace(/^(Stock tool|Pick count fix): /, "");
+let rows = [], total = 0, staffLoaded = false, timer;
+
+const args = (offset, limit) => ({ p_from: $("from").value || null, p_to: $("to").value || null, p_staff: $("who").value || null,
+  p_search: $("q").value.trim() || null, p_kind: $("kind").value, p_limit: limit, p_offset: offset });
+async function fetchPage(offset, limit) {
+  const { data, error } = await sb.rpc("wms_stock_history", args(offset, limit));
+  if (error) { if (/FORBIDDEN|NOT_STAFF|JWT/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/history.html"; } throw error; }
+  return data;
+}
+async function load(append = false) {
+  $("err").textContent = "";
+  try {
+    const d = await fetchPage(append ? rows.length : 0, 200);
+    if (!staffLoaded) { $("who").innerHTML += d.staff.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join(""); staffLoaded = true; }
+    rows = append ? rows.concat(d.rows) : d.rows; total = d.total;
+    render();
+  } catch (e) { $("err").textContent = e.message; }
+}
+function render() {
+  $("count").textContent = `${fmt(total)} CHANGE${total === 1 ? "" : "S"}${rows.length < total ? ` · SHOWING ${fmt(rows.length)}` : ""}`;
+  $("more").hidden = rows.length >= total;
+  $("rows").innerHTML = rows.length ? rows.map((r) => {
+    const [tl, tc] = typeLabel(r);
+    const when = new Date(r.at);
+    const loc = r.from_bin ? `${esc(r.from_bin)} → ${esc(r.bin ?? "")}` : esc(r.bin ?? "-");
+    const chg = r.from_bin ? `${Math.abs(r.change)}` : `${r.change > 0 ? "+" : "−"}${Math.abs(r.change)}`;
+    return `<tr class="${r.undone_at ? "undone" : ""}"><td class="mono" style="white-space:nowrap">${when.toLocaleDateString("en-AU", { timeZone: tz, day: "numeric", month: "short" })}<br>${when.toLocaleTimeString("en-AU", { timeZone: tz, hour: "numeric", minute: "2-digit" })}</td>
+      <td><b>${esc(r.who)}</b></td>
+      <td><span class="t" style="background:${tc}">${esc(tl)}</span></td>
+      <td><b>${esc(r.product ?? "")}</b>${r.variant ? ` <span class="mono">${esc(r.variant)}</span>` : ""}<div class="sku">${esc(r.sku)}</div></td>
+      <td class="loc">${loc}</td>
+      <td class="chg ${r.from_bin ? "" : r.change > 0 ? "plus" : "minus"}">${chg}</td>
+      <td class="num">${r.from_bin ? `<span class="small">${esc(r.from_bin)}: ${r.from_after ?? "-"}</span><br>` : ""}${r.after ?? "-"}</td>
+      <td>${esc(reasonText(r)) || (r.order_number ? "" : `<span class="small">-</span>`)}${r.order_number ? `<div class="small">Order #${esc(r.order_number)}</div>` : ""}
+        ${r.undone_at ? `<div class="small"><b>Undone</b> by ${esc(r.undone_by ?? "")} ${new Date(r.undone_at).toLocaleString("en-AU", { timeZone: tz, day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</div>` : ""}</td>
+      <td>${r.undoable ? `<button class="ghost undo" data-undo="${r.id}">Undo</button>` : ""}</td></tr>`;
+  }).join("") : `<tr><td colspan="9">No changes for these filters.</td></tr>`;
+}
+for (const id of ["from", "to", "who", "kind"]) $(id).addEventListener("change", () => load());
+$("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => load(), 350); });
+$("more").onclick = () => load(true);
+
+// undo a move or a stock change
+function modal(html) { $("mbody").innerHTML = html; $("modal").hidden = false; }
+$("mclose").onclick = () => { $("modal").hidden = true; };
+const UNDO_ERR = (r) => ({ NOT_ENOUGH_FREE: `Only ${r.free} free in ${r.bin} (needs ${r.need}). The stock has since been picked, moved or reserved for a cart.`,
+  ALREADY_UNDONE: `Already undone by ${r.by ?? "someone"}.`, NOT_UNDOABLE: "This kind of change can't be undone here.", BIN_INACTIVE: `${r.bin} is switched off.`,
+  FORBIDDEN: "Only supervisors and admins can undo.", NOT_FOUND: "Change not found." }[r.error] ?? r.error);
+$("rows").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-undo]"); if (!b) return;
+  const id = Number(b.dataset.undo), row = rows.find((x) => x.id === id);
+  const { data: pv, error } = await sb.rpc("wms_undo_stock_change", { p_txn_id: id });
+  if (error) return modal(`<h2>Can't undo</h2><p class="bad">${esc(error.message)}</p>`);
+  if (!pv.ok) return modal(`<h2>Can't undo this</h2><p class="bad">${esc(UNDO_ERR(pv))}</p>`);
+  const what = pv.kind === "move"
+    ? `Move <b>${pv.qty} × ${esc(pv.sku)}</b> back from <b class="loc">${esc(pv.from)}</b> (${pv.from_now} now → ${pv.from_now - pv.qty}) to <b class="loc">${esc(pv.to)}</b> (${pv.to_now} now → ${pv.to_now + pv.qty}).`
+    : `${pv.change > 0 ? "Put back" : "Take out"} <b>${Math.abs(pv.change)} × ${esc(pv.sku)}</b> ${pv.change > 0 ? "into" : "from"} <b class="loc">${esc(pv.bin)}</b> (${pv.now} now → ${pv.after}).`;
+  modal(`<h2>Undo this ${pv.kind === "move" ? "move" : "stock change"}?</h2>
+    <p class="small">Original: ${[row?.who, row ? new Date(row.at).toLocaleString("en-AU", { timeZone: tz, day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "", reasonText(row ?? {})].filter(Boolean).map(esc).join(" · ")}</p>
+    <p style="font-size:18px;margin:10px 0">${what}</p>
+    ${pv.kind === "move" ? `<p class="small">Make sure the stock is physically moved back too.</p>` : ""}
+    <label style="display:grid;gap:4px;margin-top:8px"><span class="mono">Reason (optional)</span><input id="undoreason" placeholder="eg Moved to the wrong shelf"></label>
+    <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="signal" id="undogo">Undo it</button></div>`);
+  $("undogo").onclick = async () => {
+    $("undogo").disabled = true;
+    const { data: r, error } = await sb.rpc("wms_undo_stock_change", { p_txn_id: id, p_reason: $("undoreason").value.trim() || null, p_confirmed: true });
+    if (error || !r.ok) { $("undogo").disabled = false; return modal(`<h2>Can't undo this</h2><p class="bad">${esc(error?.message ?? UNDO_ERR(r))}</p>`); }
+    modal(`<h2>Undone</h2><p>${r.kind === "move" ? `${r.qty} × ${esc(r.sku)} moved back: ${esc(r.from)} now ${r.from_after}, ${esc(r.to)} now ${r.to_after}.` : `${esc(r.bin)} now has ${r.after} × ${esc(r.sku)}.`}</p>
+      <p class="small">The undo is logged in this history under your name.</p>`);
+    load();
+  };
+});
+
+// CSV of everything matching the filters (up to 20,000 rows)
+$("csv").onclick = async () => {
+  $("csv").disabled = true; $("csv").textContent = "Preparing…";
+  try {
+    let all = [], off = 0, tot = 1;
+    while (off < tot && off < 20000) { const d = await fetchPage(off, 1000); all = all.concat(d.rows); tot = d.total; off += 1000; if (!d.rows.length) break; }
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const head = ["Date", "Time", "Who", "Type", "SKU", "Product", "Variant", "From location", "Location", "Change", "Now in location", "From location now", "Reason", "Order"];
+    const lines = all.map((r) => { const t = new Date(r.at);
+      return [t.toLocaleDateString("en-CA", { timeZone: tz }), t.toLocaleTimeString("en-AU", { timeZone: tz, hour12: false }), r.who, typeLabel(r)[0], r.sku, r.product, r.variant,
+        r.from_bin, r.bin, r.change, r.after, r.from_after, reasonText(r), r.order_number].map(q).join(","); });
+    const blob = new Blob([head.map(q).join(",") + "\n" + lines.join("\n")], { type: "text/csv" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `twl-stock-history-${$("from").value}-to-${$("to").value}.csv`; a.click();
+  } catch (e) { $("err").textContent = e.message; }
+  $("csv").disabled = false; $("csv").textContent = "Download CSV";
+};
+load();
+</script>
+</body>
+</html>

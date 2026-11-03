@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Replenishment · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  .wrap{max-width:1500px}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:10px}
+  .filters label{display:grid;gap:4px}
+  .filters input,.filters select{min-height:42px}
+  .tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px}
+  .tile{background:var(--surface);border:1px solid var(--rule);padding:12px}
+  .tile .n{font:900 34px/1 Archivo,sans-serif;color:var(--ink);margin-top:6px}
+  .tile.red{border-top:6px solid var(--red)} .tile.amber{border-top:6px solid var(--amber)} .tile.ink{border-top:6px solid var(--ink)} .tile.blue{border-top:6px solid var(--blue)}
+  td{font-size:14px;vertical-align:top}
+  .loc{font:600 15px "IBM Plex Mono",monospace;color:var(--ink);white-space:nowrap}
+  .sku{font:600 13px "IBM Plex Mono",monospace;color:var(--muted)}
+  .small{font-size:12px;color:var(--muted)}
+  .dot{display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:middle}
+  .dot.red{background:var(--red)} .dot.amber{background:var(--amber)}
+  .move{font:900 22px "IBM Plex Mono",monospace;color:var(--ink);text-align:right;white-space:nowrap}
+  .bk{font:500 13px "IBM Plex Mono",monospace;white-space:nowrap}
+  .legend{background:var(--panel);border-left:4px solid var(--blue);padding:10px 12px;margin-bottom:12px;font-size:14px}
+  .err{min-height:0}
+  h3{margin:22px 0 8px;font-size:16px;text-transform:uppercase;letter-spacing:.04em}
+  @media (max-width:900px){.tiles{grid-template-columns:1fr 1fr}}
+  @media (max-width:600px){.filters label{flex:1 1 100%!important;min-width:0!important}.filters label input:not([type=checkbox]),.filters label select{width:100%!important}}
+  @media print{
+    .bar,.filters,.noprint,.foot{display:none!important}
+    body{background:#fff} .wrap{max-width:none;padding:0} td,th{padding:5px 6px;font-size:11px} .move{font-size:15px}
+    .tiles{grid-template-columns:repeat(5,1fr)} .tile .n{font-size:20px} tr{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc">REPLENISHMENT</span><button class="ghost" id="out" style="border-color:#fff">Sign out</button></div>
+<main class="wrap">
+  <div class="kicker"><h2>Shelf locations to top up from backstock</h2><span class="mono" id="stamp">REPL.01</span></div>
+  <div class="filters">
+    <label><span class="mono">Low = this many or fewer</span><input id="low" type="number" min="0" max="50" value="2" style="width:140px"></label>
+    <label><span class="mono">Fill shelf up to</span><input id="fill" type="number" min="1" max="500" value="6" style="width:120px"></label>
+    <label><span class="mono">Zone</span><select id="zone" style="width:130px"><option value="">All zones</option></select></label>
+    <label style="flex:1;min-width:180px"><span class="mono">Search</span><input id="q" placeholder="SKU, product or shelf location"></label>
+    <label><span class="mono">Sort</span><select id="sort" style="width:220px"><option value="urgent">Most urgent first</option><option value="walk">Walk order (by backstock location)</option><option value="shelf">By shelf location</option></select></label>
+    <label style="display:flex;gap:6px;align-items:center;min-height:42px"><input type="checkbox" id="onlyBack" checked style="width:22px;min-height:22px"> Only items with backstock</label>
+    <button id="run" class="signal">Run report</button>
+    <button class="ghost" id="csv">CSV</button>
+    <button class="ghost" id="print">Print</button>
+  </div>
+  <div class="legend noprint">
+    <b>How it works.</b> A shelf location is listed when it holds the <b>low</b> amount or fewer of an item (or less than its replenishment rule). <b>Move</b> is how many to bring from backstock to fill it up to the <b>fill</b> amount, or more if orders are waiting.
+    <br><span class="dot red"></span> <b>Red</b> = shelf location is empty, or orders waiting need more than all shelf locations hold. &nbsp; <span class="dot amber"></span> <b>Amber</b> = at or below the low amount.
+    Backstock = Backstock, Reserved, Receiving and Staging locations.
+  </div>
+  <div class="tiles">
+    <div class="tile red"><div class="mono">Red</div><div class="n" id="tRed">-</div></div>
+    <div class="tile amber"><div class="mono">Amber</div><div class="n" id="tAmber">-</div></div>
+    <div class="tile ink"><div class="mono">Units to move</div><div class="n" id="tUnits">-</div></div>
+    <div class="tile blue"><div class="mono">Items only in backstock</div><div class="n" id="tOnly">-</div></div>
+    <div class="tile"><div class="mono">Empty shelf locations</div><div class="n" id="tEmpty">-</div></div>
+  </div>
+  <div id="err" class="err"></div>
+  <div style="overflow-x:auto"><table>
+    <thead><tr><th></th><th>Shelf location</th><th>Product</th><th class="num">On shelf</th><th class="num">Orders waiting</th><th class="num">Picked 30 days</th><th>Backstock (free units)</th><th class="num">Move</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="8" class="mono">Loading…</td></tr></tbody>
+  </table></div>
+
+  <h3>Items only in backstock (no shelf location yet)</h3>
+  <p class="small noprint" id="onlyNote" style="margin-bottom:6px"></p>
+  <div style="overflow-x:auto"><table>
+    <thead><tr><th>Product</th><th class="num">Orders waiting</th><th class="num">Backstock units</th><th>Backstock locations</th></tr></thead>
+    <tbody id="only"><tr><td colspan="4" class="mono">Loading…</td></tr></tbody>
+  </table></div>
+  <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
+</main>
+<script type="module">
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=5";
+await requireLogin();
+const $ = (id) => document.getElementById(id);
+$("out").onclick = signOut;
+const tz = "Australia/Adelaide";
+const TL = { backfill: "Backstock", reserved: "Reserved", receiving: "Receiving", staging: "Staging" };
+let data = null, zonesDone = false;
+try { const s = JSON.parse(localStorage.getItem("wms.replen") || "{}"); if (s.low != null) $("low").value = s.low; if (s.fill) $("fill").value = s.fill; if (s.sort) $("sort").value = s.sort; } catch {}
+
+async function run() {
+  $("err").textContent = ""; $("run").disabled = true;
+  try {
+    const { data: d, error } = await sb.rpc("wms_replenishment_report", { p_low: Number($("low").value), p_fill_to: Number($("fill").value),
+      p_zone: $("zone").value || null, p_search: $("q").value.trim() || null, p_only_backstock: $("onlyBack").checked });
+    if (error) { if (/FORBIDDEN|NOT_STAFF|JWT/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/replenish.html"; } throw error; }
+    data = d;
+    if (!zonesDone) { $("zone").innerHTML += d.zones.map((z) => `<option>${esc(z)}</option>`).join(""); zonesDone = true; }
+    try { localStorage.setItem("wms.replen", JSON.stringify({ low: $("low").value, fill: $("fill").value, sort: $("sort").value })); } catch {}
+    render();
+  } catch (e) { $("err").textContent = e.message; }
+  $("run").disabled = false;
+}
+const sorted = () => {
+  const r = [...data.rows], s = $("sort").value;
+  if (s === "walk") r.sort((a, b) => (a.from ?? "~").localeCompare(b.from ?? "~", "en", { numeric: true }) || a.bin.localeCompare(b.bin, "en", { numeric: true }));
+  if (s === "shelf") r.sort((a, b) => a.bin.localeCompare(b.bin, "en", { numeric: true }));
+  return r;
+};
+const bkList = (locs) => locs.slice(0, 4).map((l) => `<div class="bk"><b>${esc(l.code)}</b> ${l.qty} <span class="small">${esc(TL[l.type] ?? l.type)}</span></div>`).join("")
+  + (locs.length > 4 ? `<div class="small">+${locs.length - 4} more</div>` : "");
+function render() {
+  const rows = sorted();
+  $("tRed").textContent = fmt(rows.filter((r) => r.level === "red").length);
+  $("tAmber").textContent = fmt(rows.filter((r) => r.level === "amber").length);
+  $("tUnits").textContent = fmt(rows.reduce((s, r) => s + r.move, 0));
+  $("tOnly").textContent = fmt(data.backstock_only.length);
+  $("tEmpty").textContent = fmt(data.empty_shelf_bins);
+  $("stamp").textContent = `RUN ${new Date(data.generated_at).toLocaleString("en-AU", { timeZone: tz, day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}`;
+  $("rows").innerHTML = rows.length ? rows.map((r) => `<tr>
+    <td><span class="dot ${r.level}" title="${r.level}"></span></td>
+    <td class="loc">${esc(r.bin)}${r.zone ? `<div class="small">Zone ${esc(r.zone)}</div>` : ""}</td>
+    <td><b>${esc(r.product)}</b>${r.variant ? ` <span class="mono">${esc(r.variant)}</span>` : ""}<div class="sku">${esc(r.sku)}</div>
+      ${r.other_shelves > 0 ? `<div class="small">+${r.other_shelves} free in other shelf locations</div>` : ""}</td>
+    <td class="num"><b>${r.on_hand}</b>${r.reserved ? `<div class="small">${r.reserved} reserved</div>` : ""}</td>
+    <td class="num">${r.demand ? `<b>${r.demand}</b><div class="small">${r.demand_orders} order${r.demand_orders === 1 ? "" : "s"}</div>` : "-"}${r.short ? `<div class="small" style="color:var(--red)">${r.short} short</div>` : ""}</td>
+    <td class="num">${r.sold_30d || "-"}</td>
+    <td>${r.back_locs.length ? bkList(r.back_locs) : `<span class="small">None</span>`}</td>
+    <td class="move">${r.move ? `${r.move}` : "-"}${r.move && r.from ? `<div class="small" style="font-family:Archivo,sans-serif">from ${esc(r.from)}</div>` : ""}</td></tr>`).join("")
+    : `<tr><td colspan="8">Nothing to top up with these settings.</td></tr>`;
+  $("onlyNote").textContent = data.backstock_only.length ? `These have no shelf location. There are ${fmt(data.empty_shelf_bins)} empty shelf locations you could put them in (move them with Stock tools on the tablet).` : "";
+  $("only").innerHTML = data.backstock_only.length ? data.backstock_only.map((r) => `<tr>
+    <td><b>${esc(r.product)}</b>${r.variant ? ` <span class="mono">${esc(r.variant)}</span>` : ""}<div class="sku">${esc(r.sku)}</div></td>
+    <td class="num">${r.demand || "-"}</td><td class="num"><b>${r.back_units}</b></td><td>${bkList(r.back_locs)}</td></tr>`).join("")
+    : `<tr><td colspan="4">None.</td></tr>`;
+}
+$("run").onclick = run;
+$("sort").onchange = () => { if (data) render(); };
+for (const id of ["zone", "onlyBack"]) $(id).addEventListener("change", run);
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
+$("print").onclick = () => window.print();
+$("csv").onclick = () => {
+  if (!data) return;
+  const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const head = ["Level", "Shelf location", "Zone", "SKU", "Product", "Variant", "On shelf", "Reserved", "Fill to", "Orders waiting (units)", "Short", "Picked 30 days", "Backstock units", "Move", "Move from", "All backstock locations"];
+  const lines = sorted().map((r) => [r.level, r.bin, r.zone, r.sku, r.product, r.variant, r.on_hand, r.reserved, r.fill_to, r.demand, r.short, r.sold_30d, r.back_units, r.move, r.from,
+    r.back_locs.map((l) => `${l.code} (${l.qty})`).join("; ")].map(q).join(","));
+  const only = data.backstock_only.map((r) => ["no shelf", "", "", r.sku, r.product, r.variant, 0, 0, "", r.demand, "", "", r.back_units, "", "", r.back_locs.map((l) => `${l.code} (${l.qty})`).join("; ")].map(q).join(","));
+  const blob = new Blob([head.map(q).join(",") + "\n" + lines.concat(only).join("\n")], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `twl-replenishment-${new Date().toLocaleDateString("en-CA", { timeZone: tz })}.csv`; a.click();
+};
+run();
+</script>
+</body>
+</html>

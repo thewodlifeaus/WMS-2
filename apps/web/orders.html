@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orders and carts · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  .wrap{max-width:1500px}
+  .tabs{display:flex;gap:0;border-bottom:2px solid var(--ink);margin:8px 0 12px}
+  .tabs button{background:transparent;color:var(--ink);border:0;border-bottom:4px solid transparent;margin-bottom:-2px;font-size:16px}
+  .tabs button.on{border-bottom-color:var(--orange)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .chipbtn{display:flex;gap:10px;align-items:center;min-height:44px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--rule);font-weight:800}
+  .chipbtn b{font:600 20px "IBM Plex Mono",monospace}
+  .chipbtn.on{border:2px solid var(--ink)}
+  .chipbtn .dot{width:10px;height:10px;border-radius:50%}
+  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:10px}
+  .toolbar label{display:grid;gap:4px}
+  .toolbar input{min-height:40px}
+  .build{position:sticky;bottom:0;background:var(--ink);color:#fff;padding:12px 16px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:12px;z-index:5}
+  .build input{width:80px;min-height:40px}
+  .build .mono{color:#ccc}
+  .build button{min-height:40px}
+  .seg{display:inline-flex;border:1px solid #fff}
+  .seg button{background:transparent;color:#fff;border:0;min-height:40px;font-size:14px;padding:0 12px}
+  .seg button.on{background:#fff;color:#111}
+  table input[type=checkbox]{width:20px;min-height:20px}
+  td{font-size:14px} tr.sel td{background:#eef1f8}
+  .grp{display:inline-block;font:800 11px Archivo,sans-serif;letter-spacing:.04em;padding:3px 7px;color:#fff;white-space:nowrap}
+  .types{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-4px 0 10px}
+  .types button{min-height:36px;padding:0 10px;font-size:13px;background:var(--surface);color:var(--ink);border:1px solid var(--rule);font-weight:800;display:flex;gap:6px;align-items:center}
+  .types button.on{border:2px solid var(--ink)}
+  .types b{font:600 15px "IBM Plex Mono",monospace}
+  .tag{display:inline-block;font:600 10px "IBM Plex Mono",monospace;padding:2px 5px;border:1px solid var(--rule);margin:1px;background:var(--panel)}
+  .ok{color:var(--green);font-weight:800} .bad{color:var(--red);font-weight:800} .warn{color:var(--amber);font-weight:800}
+  .carts{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+  .card{background:var(--surface);border:1px solid var(--rule);padding:12px;cursor:pointer;display:grid;gap:6px}
+  .card:hover{border-color:var(--ink)}
+  .card h3{font-size:22px;display:flex;justify-content:space-between;align-items:center}
+  .bar2{height:8px;background:var(--panel);border:1px solid var(--rule)} .bar2 i{display:block;height:100%;background:var(--green)}
+  .detail{margin-top:12px}
+  .picks img{width:44px;height:44px;object-fit:cover;background:var(--panel)}
+  .bin{font:600 15px "IBM Plex Mono",monospace;color:var(--ink)}
+  .split{font:500 12px "IBM Plex Mono",monospace;color:var(--muted)}
+  .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
+  .modal .panel{max-width:640px;width:100%;max-height:85vh;overflow:auto}
+  .last{font-size:13px}
+  .findbox{margin-bottom:12px} .findbox input{font-size:18px;min-height:50px}
+  .hit{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:10px 4px;border-bottom:1px solid var(--rule)}
+  .hit .where{font-weight:800;color:var(--ink)} .hit .tote{font:900 26px "IBM Plex Mono",monospace;color:var(--ink);min-width:110px}
+  @media print{.bar,.tabs,#ordersTab,.cardsWrap,.noprint{display:none!important}.detail{margin:0}body{background:#fff}}
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc">ORDERS AND CARTS</span><button class="ghost" id="out">Sign out</button></div>
+<main class="wrap">
+  <div class="tabs"><button id="t1" class="on">Orders</button><button id="t2">Carts</button></div>
+
+  <section id="ordersTab">
+    <div class="toolbar">
+      <div class="chips" id="chips" style="margin:0"></div>
+      <span style="flex:1"></span>
+      <label><span class="mono">Search</span><input id="q" placeholder="Order #, name, service or SKU"></label>
+      <div style="display:grid;gap:4px"><span class="mono last" id="last"></span><button id="pull" class="ghost" hidden>Pull orders from ShipStation</button></div>
+    </div>
+    <div class="types" id="types"></div>
+    <div id="err" class="err"></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th><input type="checkbox" id="all" title="Select all shown"></th><th>Order</th><th>Type</th><th>Customer</th><th class="hide-sm">Ship to</th>
+        <th>Shipping service</th><th class="hide-sm">Tags</th><th class="num">Units</th><th>Stock</th><th class="hide-sm">Ordered</th><th>Status</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="11" class="mono">Loading…</td></tr></tbody>
+    </table></div>
+    <div class="build" id="build" hidden>
+      <span><b id="selcount">0</b> <span class="mono">ORDERS SELECTED</span></span>
+      <label class="mono">Select first <input id="firstn" inputmode="numeric" value="60"></label><button class="ghost" id="pickfirst" style="color:#fff;border-color:#fff">Select</button>
+      <span class="seg"><button id="m1" class="on" type="button">1 order per tote</button><button id="m2" type="button">Share totes</button></span>
+      <label class="mono">Totes per cart <input id="per" inputmode="numeric" value="25"></label>
+      <label class="mono" id="ppt" hidden>Pieces per tote <input id="pieces" inputmode="numeric" value="6"></label>
+      <span class="seg" title="How orders are grouped onto carts"><button id="s1" class="on" type="button">Most urgent first</button><button id="s2" type="button">Fastest picking</button></span>
+      <span class="mono" id="cartinfo"></span>
+      <span style="flex:1"></span>
+      <button class="signal" id="buildbtn" disabled>Build carts</button>
+    </div>
+  </section>
+
+  <section id="cartsTab" hidden>
+    <div class="cardsWrap">
+      <div class="panel findbox"><div class="kicker"><h2>Find an order on a cart</h2><span class="mono">CANCELLED OR CHANGED? FIND IT FAST</span></div>
+        <input id="findq" placeholder="Order number, customer name, or scan a tote (eg BIN053)" autocomplete="off">
+        <div id="found"></div></div>
+      <div class="toolbar"><span class="mono" id="cartsum"></span><span style="flex:1"></span><button class="ghost" id="refreshCarts">Refresh</button></div>
+      <div class="carts" id="carts"></div>
+      <h3 style="margin:16px 0 6px">Picking rates today</h3>
+      <div style="overflow-x:auto"><table><thead><tr><th>Picker</th><th class="num">Units</th><th class="num">Carts</th><th class="num">Active time</th><th class="num">Units / hour</th><th class="num">Missing</th><th class="num">Not scanned</th></tr></thead>
+        <tbody id="rates"><tr><td colspan="7" class="mono">Loading…</td></tr></tbody></table></div>
+      <p class="mono" style="margin-top:4px">Active time excludes pauses. Units / hour = units picked ÷ active time.</p>
+    </div>
+    <div class="detail" id="detail" hidden></div>
+  </section>
+  <p class="foot noprint">TRAIN<br>WITHOUT<br>LIMITS.</p>
+</main>
+
+<div class="modal" id="modal" hidden><div class="panel"><div id="mbody"></div><div style="margin-top:12px;text-align:right"><button id="mclose">Close</button></div></div></div>
+
+<script type="module">
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=5";
+const me = await requireLogin();
+if (me?.role === "display") location.href = "/tv.html";
+const boss = ["admin", "supervisor"].includes(me?.role);
+const $ = (id) => document.getElementById(id);
+$("out").onclick = signOut;
+$("pull").hidden = !boss;
+const tab = (n) => { $("t1").classList.toggle("on", n === 1); $("t2").classList.toggle("on", n === 2);
+  $("ordersTab").hidden = n !== 1; $("cartsTab").hidden = n !== 2; if (n === 2) loadCarts(); };
+$("t1").onclick = () => tab(1); $("t2").onclick = () => tab(2);
+function modal(html) { $("mbody").innerHTML = html; $("modal").hidden = false; }
+$("mclose").onclick = () => { $("modal").hidden = true; };
+async function check(error) { if (error && /NOT_STAFF|JWT/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/orders.html"; } }
+const ago = (t) => { if (!t) return "-"; const h = (Date.now() - new Date(t)) / 36e5; return h < 1 ? `${Math.round(h * 60)}m` : h < 48 ? `${Math.round(h)}h` : `${Math.round(h / 24)}d`; };
+
+// ---------------- orders ----------------
+const VIEWS = [["ready","Ready to cart","var(--green)"],["no_service","No shipping service","var(--red)"],["on_hold","On hold","var(--amber)"],["in_progress","On a cart / packing","var(--blue)"],["all","All open",""]];
+let view = "ready", data = null, sel = new Set(), timer;
+// order types: how SkuVault splits orders (ShipStation tag + country + pickup service), one type per cart
+const GROUPS = [["REGS","Regular","#2f5bd3"],["PRIO_AU","Priority AU","#c2185b"],["PRIO_INT","International","#6a1b9a"],
+  ["ICON","The Iconic","#111111"],["OPENFR8","OpenFreight","#00796b"],["PKUP","Warehouse pickup","#e65100"],["OTHER","Other","#757575"]];
+const GN = Object.fromEntries(GROUPS.map(([k, l, c]) => [k, { label: l, col: c }]));
+const grpBadge = (g) => (g ?? "").split("+").filter(Boolean).map((k) => `<span class="grp" style="background:${GN[k]?.col ?? "#757575"}">${esc(GN[k]?.label ?? k)}</span>`).join(" ");
+let typeF = "ALL", skuF = "all";
+const shown = () => (data?.orders ?? []).filter((o) => (typeF === "ALL" || o.group === typeF)
+  && (skuF === "all" || (skuF === "single" ? o.lines === 1 : o.lines > 1)));
+async function loadOrders() {
+  const { data: d, error } = await sb.rpc("wms_order_queue", { p_view: view, p_search: $("q").value.trim() || null });
+  if (error) { await check(error); $("err").textContent = error.message; return; }
+  data = d; $("err").textContent = "";
+  const s = d.summary;
+  $("chips").innerHTML = VIEWS.map(([k, label, col]) => `<button class="chipbtn ${k === view ? "on" : ""}" data-view="${k}">
+      ${col ? `<span class="dot" style="background:${col}"></span>` : ""}${label} <b>${fmt(k === "all" ? s.ready + s.no_service + s.on_hold + s.in_progress : s[k])}</b></button>`).join("")
+    + (s.no_stock ? `<span class="chipbtn" style="cursor:default"><span class="dot" style="background:var(--red)"></span>Ready but short of stock <b>${fmt(s.no_stock)}</b></span>` : "");
+  for (const id of [...sel]) if (!d.orders.some((o) => o.id === id && o.ready === "ready")) sel.delete(id);
+  renderTypes();
+  loadOrdersRender();
+  $("build").hidden = !(boss && view === "ready");
+  $("all").disabled = !(boss && view === "ready");
+  updateSel();
+  const st = await sb.from("sync_state").select("last_ok_at,last_error").eq("system", "shipstation_orders").maybeSingle();
+  $("last").textContent = st.data ? `LAST SHIPSTATION PULL ${new Date(st.data.last_ok_at).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })} · AUTO EVERY 5 MIN` : "";
+}
+function row(o) {
+  const can = boss && o.ready === "ready";
+  const status = o.ready === "ready" ? `<span class="ok">Ready</span>`
+    : o.ready === "no_service" ? `<span class="bad">No service in ShipStation</span>`
+    : o.ready === "on_hold" ? `<span class="warn">On hold</span>${o.hold_reason ? `<div class="split">${esc(o.hold_reason)}</div>` : ""}`
+    : `<span>${esc(o.on_cart ? `On ${o.on_cart}` : o.status.replace("_", " "))}</span>`;
+  return `<tr class="${sel.has(o.id) ? "sel" : ""}">
+    <td>${can ? `<input type="checkbox" data-id="${o.id}" ${sel.has(o.id) ? "checked" : ""}>` : ""}</td>
+    <td><b>#${esc(o.order_number)}</b>${o.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}</td>
+    <td>${grpBadge(o.group)}</td>
+    <td>${esc(o.customer ?? "")}</td>
+    <td class="hide-sm">${esc([o.city, o.state, o.country !== "AU" ? o.country : ""].filter(Boolean).join(" "))}</td>
+    <td>${esc(o.service ?? "")}${o.service_code ? `<div class="split">${esc(o.service_code)}</div>` : ""}</td>
+    <td class="hide-sm">${(o.tags ?? []).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</td>
+    <td class="num">${fmt(o.units)}<div class="split">${o.lines} line${o.lines === 1 ? "" : "s"}</div></td>
+    <td>${o.stock_ok ? `<span class="ok">✓</span>` : `<span class="bad">Short</span>`}</td>
+    <td class="hide-sm">${ago(o.ordered_at)}</td>
+    <td>${status}</td></tr>`;
+}
+$("chips").addEventListener("click", (e) => { const b = e.target.closest("[data-view]"); if (!b) return; view = b.dataset.view; sel.clear(); loadOrders(); });
+$("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(loadOrders, 300); });
+$("rows").addEventListener("change", (e) => { const c = e.target.closest("input[data-id]"); if (!c) return;
+  c.checked ? sel.add(c.dataset.id) : sel.delete(c.dataset.id); c.closest("tr").classList.toggle("sel", c.checked); updateSel(); });
+$("all").addEventListener("change", () => { for (const o of shown()) if (o.ready === "ready") $("all").checked ? sel.add(o.id) : sel.delete(o.id); loadOrdersRender(); });
+$("pickfirst").onclick = () => { sel.clear(); const n = Number($("firstn").value) || 0;
+  for (const o of shown().filter((x) => x.ready === "ready" && x.stock_ok).slice(0, n)) sel.add(o.id); loadOrdersRender(); };
+function loadOrdersRender() { const r = shown(); $("rows").innerHTML = r.length ? r.map(row).join("") : `<tr><td colspan="11">No orders here.</td></tr>`; updateSel(); }
+function renderTypes() {
+  const g = data?.groups ?? {}; const total = Object.values(g).reduce((a, n) => a + n, 0);
+  $("types").innerHTML = `<span class="mono">TYPE</span><button data-t="ALL" class="${typeF === "ALL" ? "on" : ""}">All types <b>${fmt(total)}</b></button>`
+    + GROUPS.filter(([k]) => g[k] || typeF === k).map(([k, l, c]) => `<button data-t="${k}" class="${typeF === k ? "on" : ""}"><span style="width:10px;height:10px;border-radius:50%;background:${c}"></span>${esc(l)} <b>${fmt(g[k] ?? 0)}</b></button>`).join("")
+    + `<span style="width:16px"></span><span class="mono">ITEMS</span>`
+    + [["all","Any"],["single","1 SKU only"],["multi","2+ SKUs"]].map(([k, l]) => `<button data-k="${k}" class="${skuF === k ? "on" : ""}">${l}</button>`).join("");
+}
+$("types").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-t]"), k = e.target.closest("[data-k]");
+  if (t) typeF = t.dataset.t; else if (k) skuF = k.dataset.k; else return;
+  // keep only selected orders that are still on screen
+  const vis = new Set(shown().map((o) => o.id)); for (const id of [...sel]) if (!vis.has(id)) sel.delete(id);
+  renderTypes(); loadOrdersRender();
+});
+let shareMode = false, sortMode = "urgent";
+try { if (localStorage.getItem("wms.cartSort") === "route") sortMode = "route"; } catch {}
+// same packing rules as the database: whole orders only, express first then oldest
+// selected orders split by type: each type is built onto its own carts
+const selByGroup = () => { const m = new Map(); for (const o of (data?.orders ?? []).filter((x) => sel.has(x.id))) { if (!m.has(o.group)) m.set(o.group, []); m.get(o.group).push(o); } return m; };
+function plan() {
+  const per = Math.max(1, Math.min(48, Number($("per").value) || 12));
+  const pieces = shareMode ? Math.max(1, Number($("pieces").value) || 6) : null;
+  let carts = 0, totes = 0, left = 0; const free = data?.free_carts ?? 0; const groups = selByGroup();
+  for (const [, orders] of groups) {
+    const r = planOne(orders, per, pieces, shareMode, free - carts);
+    carts += r.carts; totes += r.totes; left += r.left;
+  }
+  return { carts, totes, left, per, pieces, groups: groups.size };
+}
+function planOne(queue, per, pieces, shareMode, free) {
+  const used = new Array(queue.length).fill(false);
+  let carts = 0, totes = 0;
+  while (used.includes(false) && carts < free) {
+    const slots = []; let placed = 0;
+    queue.forEach((o, i) => {
+      if (used[i]) return;
+      if (!shareMode) { if (slots.length < per) { slots.push(o.units); used[i] = true; placed++; } return; }
+      let j = o.units <= pieces ? slots.findIndex((u) => u + o.units <= pieces) : -1;
+      if (j < 0 && slots.length < per) { slots.push(0); j = slots.length - 1; }
+      if (j < 0) return;
+      slots[j] += o.units; used[i] = true; placed++;
+    });
+    if (!placed) break;
+    carts++; totes += slots.length;
+  }
+  return { carts, totes, left: used.filter((u) => !u).length };
+}
+function updateSel() {
+  $("selcount").textContent = sel.size;
+  const p = plan();
+  $("cartinfo").textContent = sel.size
+    ? `= ${p.carts} CART${p.carts === 1 ? "" : "S"}${p.groups > 1 ? ` (${p.groups} TYPES, KEPT SEPARATE)` : ""} · ${p.totes} TOTES${p.left ? ` · ${p.left} WON'T FIT` : ""} · ${data?.free_carts ?? 0} FREE`
+    : `${data?.free_carts ?? 0} CARTS FREE`;
+  $("buildbtn").disabled = !sel.size || !p.carts;
+}
+function setMode(share) { shareMode = share; $("m1").classList.toggle("on", !share); $("m2").classList.toggle("on", share); $("ppt").hidden = !share; updateSel(); }
+$("m1").onclick = () => setMode(false); $("m2").onclick = () => setMode(true);
+function setSort(m) { sortMode = m; $("s1").classList.toggle("on", m === "urgent"); $("s2").classList.toggle("on", m === "route"); try { localStorage.setItem("wms.cartSort", m); } catch {} }
+$("s1").onclick = () => setSort("urgent"); $("s2").onclick = () => setSort("route"); setSort(sortMode);
+$("pieces").addEventListener("input", updateSel);
+$("per").addEventListener("input", updateSel);
+
+$("buildbtn").onclick = async () => {
+  const p = plan();
+  const how = shareMode ? `${p.per} totes per cart, up to ${p.pieces} pieces per tote (orders can share a tote)` : `${p.per} totes per cart, 1 order per tote`;
+  const groups = selByGroup();
+  const typeList = [...groups.keys()].map((k) => GN[k]?.label ?? k).join(", ");
+  if (!confirm(`Build about ${p.carts} cart(s) from ${sel.size} orders?\n${how}.\nOrder types: ${typeList}${groups.size > 1 ? " (each type goes on its own carts)" : ""}.\nOrders are never split: an order only goes on a cart if it fits whole.\n${sortMode === "route" ? "Fastest picking: each cart starts with the most urgent order left, then adds the orders closest to it on the walk." : "Most urgent first: express first, then oldest."}`)) return;
+  $("buildbtn").disabled = true; $("buildbtn").textContent = "Building…";
+  // one build per order type, so a cart only ever holds one type
+  const r = { ok: false, carts: [], failed: [], skipped: [], left_over: 0, left_over_orders: [] };
+  let error = null;
+  for (const [g, orders] of groups) {
+    const res = await sb.rpc("wms_build_carts_sorted", { p_order_ids: orders.map((o) => o.id), p_totes_per_cart: p.per, p_pieces_per_tote: p.pieces, p_sort: sortMode });
+    if (res.error) { error = res.error; break; }
+    const x = res.data;
+    for (const c of x.carts ?? []) c.group = g;
+    r.ok ||= !!x.ok; r.carts.push(...(x.carts ?? [])); r.failed.push(...(x.failed ?? [])); r.skipped.push(...(x.skipped ?? []));
+    r.left_over += x.left_over ?? 0; r.left_over_orders.push(...(x.left_over_orders ?? []));
+    if (!x.ok && x.error) r.error = x.error;
+    if (x.error === "NO_FREE_CARTS") break;
+  }
+  if (r.ok && r.error === "NO_READY_ORDERS") delete r.error;
+  $("buildbtn").textContent = "Build carts";
+  if (error) { await check(error); modal(`<h2>Could not build carts</h2><p class="bad">${esc(error.message)}</p>`); return loadOrders(); }
+  sel.clear();
+  const ERR = { NO_READY_ORDERS: "None of those orders are ready.", NO_FREE_CARTS: "All carts are in use." };
+  modal(`<h2>${r.ok ? `${r.carts.length} cart${r.carts.length === 1 ? "" : "s"} built` : "No carts built"}</h2>
+    ${r.error ? `<p class="bad">${esc(ERR[r.error] ?? r.error)}</p>` : ""}
+    <p class="mono">${esc(how.toUpperCase())} · ${sortMode === "route" ? "FASTEST PICKING" : "MOST URGENT FIRST"}</p>
+    ${(r.carts ?? []).length ? `<table style="margin-top:8px"><tr><th>Cart</th><th>Type</th><th class="num">Orders</th><th class="num">Totes</th><th class="num">Units</th><th class="num">Stops</th><th class="num" title="Estimated walk from the packing desks and back. 1 = one aisle length (west to east)">Walk</th><th>Short of stock</th></tr>
+      ${r.carts.map((c) => `<tr><td><b>${esc(c.cart)}</b></td><td>${grpBadge(c.group)}</td><td class="num">${c.orders}</td><td class="num">${c.totes}</td><td class="num">${c.units}</td><td class="num">${c.stops}</td><td class="num">${c.walk != null ? `${Number(c.walk).toFixed(1)}` : "-"}</td>
+        <td>${(c.shortages ?? []).map((s) => `<span class="tag">${esc(s.sku)} ×${s.short}</span>`).join("") || "-"}</td></tr>`).join("")}</table>` : ""}
+    ${(r.failed ?? []).length ? `<p class="bad" style="margin-top:8px">Not built: ${r.failed.map((f) => `${esc(f.cart)} (${esc(f.error)})`).join("; ")}</p>` : ""}
+    ${(r.skipped ?? []).length ? `<p class="warn" style="margin-top:8px">Skipped ${r.skipped.length}: ${r.skipped.map((s) => `#${esc(s.order_number)} (${esc(s.reason.replace("_", " "))})`).join(", ")}</p>` : ""}
+    ${r.left_over ? `<p class="warn" style="margin-top:8px">${r.left_over} orders left in the queue (not enough free carts): ${(r.left_over_orders ?? []).slice(0, 20).map((n) => "#" + esc(n)).join(", ")}</p>` : ""}
+    ${(r.carts ?? []).some((c) => c.walk != null) ? `<p class="mono" style="margin-top:8px">WALK = ESTIMATED WALK FROM THE DESKS AND BACK, IN AISLE LENGTHS (1 = WEST TO EAST ONCE). TOTAL ${r.carts.reduce((a, c) => a + (Number(c.walk) || 0), 0).toFixed(1)}</p>` : ""}
+    <p class="mono" style="margin-top:10px">${(r.carts ?? []).some((c) => c.fixed_totes) ? "Orders are already placed in the totes on each cart (eg CART02 tote 1 = BIN026). Pickers just scan the cart to start." : "Pickers scan the cart, then one empty tote per tote number, to start."}</p>`);
+  loadOrders();
+};
+
+$("pull").onclick = async () => {
+  $("pull").disabled = true; $("pull").textContent = "Pulling…";
+  const { data: r, error } = await sb.functions.invoke("sync-shipstation-orders", { body: {} });
+  $("pull").disabled = false; $("pull").textContent = "Pull orders from ShipStation";
+  if (error || !r?.ok) { let m = error?.message ?? r?.error; try { m = (await error.context.json()).error ?? m; } catch {} modal(`<h2>Pull failed</h2><p class="bad">${esc(m)}</p>`); return; }
+  modal(`<h2>ShipStation orders pulled</h2><p><b>${r.imported}</b> new · <b>${r.updated ?? 0}</b> updated · <b>${r.cancelled}</b> cancelled · <b>${r.shipped_elsewhere}</b> shipped outside the WMS</p>
+    ${(r.unknown_skus ?? []).length ? `<p class="bad">Unknown SKUs (orders held): ${r.unknown_skus.map(esc).join(", ")}</p>` : ""}`);
+  loadOrders();
+};
+loadOrders();
+setInterval(() => { if (!$("ordersTab").hidden && !sel.size && $("modal").hidden) loadOrders(); }, 60000);
+
+// ---------------- carts ----------------
+const SC = { in_progress: ["Picking", "var(--blue)"], assigned: ["Assigned", "var(--amber)"], draft: ["Ready to pick", "var(--green)"], completed: ["Picked", "var(--ink)"] };
+async function loadCarts() {
+  loadRates();
+  const { data: d, error } = await sb.rpc("wms_carts_overview");
+  if (error) { await check(error); $("carts").innerHTML = `<p class="bad">${esc(error.message)}</p>`; return; }
+  const open = d.filter((c) => c.status !== "completed");
+  $("cartsum").textContent = `${open.length} CARTS OPEN · ${fmt(open.reduce((a, c) => a + c.orders, 0))} ORDERS · ${fmt(open.reduce((a, c) => a + (c.units - c.picked), 0))} UNITS TO PICK · ${d.length - open.length} PICKED TODAY`;
+  $("carts").innerHTML = d.length ? d.map((c) => { const [label, col] = c.paused && !c.picker ? ["Needs a picker", "var(--orange)"] : c.paused ? ["Paused", "var(--amber)"] : SC[c.status] ?? [c.status, "var(--muted)"]; const pct = c.units ? Math.round(100 * c.picked / c.units) : 0;
+    return `<div class="card" data-s="${c.session_id}"><h3>${esc(c.cart)} <span class="chip" style="background:${col}">${label}</span></h3>
+      <div>${grpBadge(c.group)}</div>
+      <div><b>${c.orders}</b> orders · <b>${c.units}</b> units · ${c.stops} stops</div>
+      <div class="bar2"><i style="width:${pct}%"></i></div>
+      <div class="split">${c.picked}/${c.units} picked · totes ${c.totes}/${c.orders}${c.picker ? ` · ${esc(c.picker)}` : ""}</div>
+      <div class="split">Starts at ${esc(c.first_bin ?? "-")} · built ${new Date(c.created_at).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}${c.created_by ? ` by ${esc(c.created_by)}` : ""}</div></div>`; }).join("")
+    : `<p class="panel">No carts yet. Build some from the Orders tab.</p>`;
+}
+$("refreshCarts").onclick = loadCarts;
+async function loadRates() {
+  const { data: r, error } = await sb.rpc("wms_pick_rates");
+  if (error) { $("rates").innerHTML = `<tr><td colspan="7" class="bad">${esc(error.message)}</td></tr>`; return; }
+  const hm = (m) => `${Math.floor(m / 60)}h ${String(Math.round(m % 60)).padStart(2, "0")}m`;
+  $("rates").innerHTML = r.length ? r.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td class="num">${fmt(x.units)}</td><td class="num">${x.carts}</td>
+    <td class="num">${hm(x.active_minutes)}</td><td class="num"><b>${x.units_per_hour ?? "-"}</b></td>
+    <td class="num ${x.missing ? "bad" : ""}">${x.missing}</td><td class="num ${x.unscanned ? "warn" : ""}">${x.unscanned}</td></tr>`).join("")
+    : `<tr><td colspan="7">No picking yet today.</td></tr>`;
+}
+$("carts").addEventListener("click", (e) => { const c = e.target.closest("[data-s]"); if (c) openCart(c.dataset.s); });
+
+// find an order on a cart (order number, customer, or tote barcode)
+let ftimer;
+$("findq").addEventListener("input", () => { clearTimeout(ftimer); ftimer = setTimeout(findOrder, 300); });
+$("findq").addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(ftimer); findOrder(); } });
+async function findOrder() {
+  const q = $("findq").value.trim();
+  if (q.length < 2) { $("found").innerHTML = ""; return; }
+  const { data: r, error } = await sb.rpc("wms_find_order", { p_text: q });
+  if (error) { await check(error); $("found").innerHTML = `<p class="bad">${esc(error.message)}</p>`; return; }
+  $("found").innerHTML = r.length ? r.map((o) => `<div class="hit">
+      <div class="tote">${esc(o.tote ?? o.cart ?? "-")}</div>
+      <div><b>#${esc(o.order_number)}</b> ${esc(o.customer ?? "")} ${o.group ? grpBadge(o.group) : ""}
+        <div class="where">${esc(o.where)}</div>
+        <div class="split">${o.picked}/${o.units} picked${o.picker ? ` · picker ${esc(o.picker)}` : ""}${o.shared_with ? ` · shares tote with ${esc(o.shared_with)}` : ""}${o.is_held ? ` · ON HOLD${o.hold_reason ? ": " + esc(o.hold_reason) : ""}` : ""}</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${o.session_id ? `<button class="ghost" data-open="${o.session_id}" data-num="${esc(o.order_number)}">Open cart</button>` : ""}${boss && o.session_id && ["allocated","picking","picked"].includes(o.status) ? `<button class="ghost" data-remove="${o.order_id}" style="color:var(--red);border-color:var(--red)">Take off cart</button>` : ""}</div></div>`).join("")
+    : `<p class="mono" style="margin-top:8px">No order matches "${esc(q)}".</p>`;
+}
+$("found").addEventListener("click", (e) => { const r = e.target.closest("[data-remove]"); if (r) removeBox(r.dataset.remove); });
+$("detail").addEventListener("click", async (e) => { const r = e.target.closest("[data-remove-num]"); if (!r) return;
+  const { data: hits } = await sb.rpc("wms_find_order", { p_text: r.dataset.removeNum });
+  const hit = (hits ?? []).find((h) => h.order_number === r.dataset.removeNum);
+  if (hit) removeBox(hit.order_id);
+});
+
+// take one order off its cart (customer cancelled or changed the order)
+async function removeBox(orderId) {
+  const { data: pv, error } = await sb.rpc("wms_remove_order_from_cart", { p_order_id: orderId, p_action: "cancel", p_reason: null });
+  if (error) { await check(error); return modal(`<h2>Could not check this order</h2><p class="bad">${esc(error.message)}</p>`); }
+  const ERRS = { AT_PACK_DESK: "This order is already at the pack desk (packing has started). Deal with it at the pack desk.", NOT_ON_A_CART: "This order isn't on a cart.", FORBIDDEN: "Only supervisors and admins can do this." };
+  if (!pv.ok) return modal(`<h2>Can't take this order off</h2><p class="bad">${esc(ERRS[pv.error] ?? pv.error)}</p>`);
+  let action = pv.cancelled_in_shopify ? "cancel" : "requeue";
+  const draw = () => {
+    $("mbody").innerHTML = `<h2>Take #${esc(pv.order_number)} off ${esc(pv.cart ?? "the cart")}?</h2>
+      <p class="mono">${pv.tote ? `TOTE ${esc(pv.tote)} · ` : ""}${pv.other_orders ? `${pv.other_orders} OTHER ORDER(S) STAY ON THE CART` : "THIS IS THE ONLY ORDER ON THE CART (THE CART WILL BE CLOSED)"}</p>
+      ${pv.put_back.length ? `<div class="msg warn" style="margin:8px 0"><b>${pv.units_put_back} item(s) already picked.</b> Take ${pv.put_back.length > 1 ? "them" : "it"} out of ${esc(pv.tote ?? "the tote")} and put back:</div>
+        <table><tr><th>Product</th><th class="num">Qty</th><th>Put back in</th></tr>${pv.put_back.map((x) => `<tr><td><b>${esc(x.sku)}</b> <span class="split">${esc(x.name ?? "")}${x.variant ? " " + esc(x.variant) : ""}</span></td><td class="num"><b>${x.qty}</b></td><td class="bin rb">${esc(x.to_bin)}</td></tr>`).join("")}</table>
+        <label style="display:grid;gap:4px;margin-top:8px"><span class="mono">Or put them all in one location instead (eg a returns shelf). Leave blank to put each back where it came from.</span><input id="retbin" placeholder="Location code (optional)"></label>`
+      : `<p style="margin:8px 0">Nothing has been picked for this order yet, so nothing needs putting back.</p>`}
+      ${pv.units_released ? `<p class="mono" style="margin-top:6px">${pv.units_released} ITEM(S) NOT YET PICKED: THEIR RESERVATION IS RELEASED</p>` : ""}
+      <div class="mono" style="margin-top:10px">WHAT HAPPENS TO THE ORDER?</div>
+      <div class="seg2" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">${[["requeue","Back to the queue (changed order, build again later)"],["hold","Put on hold"],["cancel","Cancelled (customer cancelled)"]].map(([k, l]) =>
+        `<button type="button" data-act="${k}" class="${action === k ? "" : "ghost"}" style="min-height:42px;font-size:14px">${l}</button>`).join("")}</div>
+      ${action === "cancel" ? `<p class="split" style="margin-top:4px">Cancels it in the WMS only. Cancel it in Shopify / ShipStation too if that hasn't happened.</p>` : ""}
+      <label style="display:grid;gap:4px;margin-top:10px"><span class="mono">Reason (required, saved with the stock history)</span><input id="remreason" placeholder="eg Customer cancelled, changed size"></label>
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end"><button class="signal" id="remgo" style="background:var(--red);border-color:var(--red)">Take it off the cart</button></div>`;
+    $("mbody").querySelectorAll("[data-act]").forEach((b) => b.onclick = () => { const rs = $("remreason").value, rb = $("retbin")?.value; action = b.dataset.act; draw(); $("remreason").value = rs; if ($("retbin")) $("retbin").value = rb ?? ""; });
+    $("retbin")?.addEventListener("input", () => { const v = $("retbin").value.trim().toUpperCase(); $("mbody").querySelectorAll(".rb").forEach((td, i) => { td.textContent = v || pv.put_back[i].to_bin; }); });
+    $("remgo").onclick = async () => {
+      const reason = $("remreason").value.trim();
+      if (!reason) { $("remreason").focus(); $("remreason").style.borderColor = "var(--red)"; return; }
+      $("remgo").disabled = true;
+      const { data: r, error } = await sb.rpc("wms_remove_order_from_cart", { p_order_id: orderId, p_action: action, p_reason: reason,
+        p_return_bin: $("retbin")?.value.trim() || null, p_confirmed: true });
+      if (error || !r.ok) { $("remgo").disabled = false; return alert(error?.message ?? (r.error === "UNKNOWN_BIN" ? `Location ${r.scanned} not recognised.` : r.error === "BIN_INACTIVE" ? `Location ${r.bin} is switched off.` : ERRS[r.error] ?? r.error)); }
+      modal(`<h2>#${esc(r.order_number)} is off ${esc(r.cart ?? "the cart")}</h2>
+        <p>${{ requeue: "It's back in the queue, ready to build onto a cart again.", hold: "It's on hold.", cancel: "It's cancelled in the WMS." }[r.action]}</p>
+        ${r.put_back.length ? `<div class="msg warn" style="margin-top:8px">Now take ${r.units_put_back} item(s) out of ${esc(r.tote ?? "the tote")} and put back: ${r.put_back.map((x) => `${esc(x.sku)} ×${x.qty} → ${esc(x.to_bin)}`).join(", ")}. The stock is already counted back there.</div>` : ""}
+        ${r.cart_closed ? `<p class="mono" style="margin-top:8px">${esc(r.cart ?? "THE CART")} HAD NO OTHER ORDERS AND IS NOW FREE.</p>` : `<p class="mono" style="margin-top:8px">${r.orders_left} ORDER(S) STILL ON ${esc(r.cart ?? "THE CART")}.</p>`}`);
+      findOrder(); loadCarts(); if (!$("detail").hidden && !r.cart_closed) { const sid = $("detail").dataset.sid; if (sid) openCart(sid); }
+      if (r.cart_closed) $("detail").hidden = true;
+    };
+  };
+  modal(""); draw();
+}
+
+$("found").addEventListener("click", async (e) => { const b = e.target.closest("[data-open]"); if (!b) return;
+  await openCart(b.dataset.open);
+  // highlight the order in the cart's order list
+  const re = new RegExp("^#" + b.dataset.num.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?!\\d)");
+  for (const tr of $("detail").querySelectorAll("tr")) if (re.test(tr.cells?.[1]?.textContent.trim() ?? "")) { tr.style.background = "#fff3c4"; tr.style.outline = "3px solid var(--orange)"; tr.scrollIntoView({ block: "center" }); }
+});
+
+// take a whole cart apart: every order back to the queue, picked items back on the shelf
+async function takeApartBox(id) {
+  const { data: pv, error } = await sb.rpc("wms_take_cart_apart", { p_session_id: id });
+  if (error || !pv.ok) { await check(error); return modal(`<h2>Can't take this cart apart</h2><p class="bad">${esc(error?.message ?? pv.error)}</p>`); }
+  modal(`<h2>Take ${esc(pv.cart ?? "this cart")} apart?</h2>
+    <p>All <b>${pv.orders}</b> order(s) go back to the queue, ready to build onto another cart.${pv.picker ? ` <b>${esc(pv.picker)}</b> is taken off it.` : ""}</p>
+    ${pv.at_pack_desk.length ? `<p class="warn">Already at the pack desk, left alone: #${pv.at_pack_desk.map(esc).join(", #")}</p>` : ""}
+    ${pv.put_back.length ? `<div class="msg warn" style="margin:8px 0"><b>${pv.units_put_back} item(s) already picked.</b> Take them out of the totes and put back:</div>
+      <table><tr><th>Tote</th><th>Product</th><th class="num">Qty</th><th>Put back in</th></tr>${pv.put_back.map((x) => `<tr><td class="bin">${esc(x.tote ?? "-")}</td><td><b>${esc(x.sku)}</b> <span class="split">#${esc(x.order_number)}</span></td><td class="num"><b>${x.qty}</b></td><td class="bin rb">${esc(x.to_bin)}</td></tr>`).join("")}</table>
+      <label style="display:grid;gap:4px;margin-top:8px"><span class="mono">Or put them all in one location instead (eg a returns shelf). Leave blank to put each back where it came from.</span><input id="tabin" placeholder="Location code (optional)"></label>`
+    : `<p class="mono" style="margin-top:6px">NOTHING HAS BEEN PICKED YET, SO NOTHING NEEDS PUTTING BACK.</p>`}
+    <label style="display:grid;gap:4px;margin-top:10px"><span class="mono">Reason (optional)</span><input id="tareason" placeholder="eg Rebuilding carts"></label>
+    <div style="margin-top:12px;display:flex;justify-content:flex-end"><button id="tago" style="background:var(--red);border-color:var(--red);color:#fff">Take ${esc(pv.cart ?? "cart")} apart</button></div>`);
+  $("tabin")?.addEventListener("input", () => { const v = $("tabin").value.trim().toUpperCase(); $("mbody").querySelectorAll(".rb").forEach((td, i) => { td.textContent = v || pv.put_back[i].to_bin; }); });
+  $("tago").onclick = async () => {
+    $("tago").disabled = true;
+    const { data: r, error } = await sb.rpc("wms_take_cart_apart", { p_session_id: id, p_reason: $("tareason").value.trim() || null,
+      p_return_bin: $("tabin")?.value.trim() || null, p_confirmed: true });
+    if (error || !r.ok) { $("tago").disabled = false; return alert(error?.message ?? (r.error === "UNKNOWN_BIN" ? `Location ${r.scanned} not recognised.` : r.error === "BIN_INACTIVE" ? `Location ${r.bin} is switched off.` : r.error)); }
+    modal(`<h2>${esc(r.cart ?? "Cart")} taken apart</h2>
+      <p><b>${r.orders_back_in_queue.length}</b> order(s) are back in the queue.</p>
+      ${r.put_back.length ? `<div class="msg warn" style="margin-top:8px">Now put back ${r.units_put_back} item(s): ${r.put_back.map((x) => `${esc(x.sku)} ×${x.qty} → ${esc(x.to_bin)}`).join(", ")}. The stock is already counted back there.</div>` : ""}
+      ${r.kept.length ? `<p class="warn" style="margin-top:8px">Left alone: ${r.kept.map((k) => `#${esc(k.order_number)} (${esc(k.why === "AT_PACK_DESK" ? "at the pack desk" : k.why)})`).join(", ")}</p>` : ""}`);
+    $("detail").hidden = true; loadCarts(); loadOrders();
+  };
+}
+
+async function openCart(id) {
+  const { data: d, error } = await sb.rpc("wms_cart_detail", { p_session_id: id });
+  if (error || !d) { await check(error); return; }
+  const s = d.session; const [label] = SC[s.status] ?? [s.status];
+  // any open cart, or a finished cart whose orders are still waiting to be packed
+  const canCancel = boss && (["draft", "assigned", "in_progress"].includes(s.status) || (s.status === "completed" && d.orders.some((o) => ["picked", "picking"].includes(o.status))));
+  const canRelease = boss && ["draft", "assigned", "in_progress"].includes(s.status) && s.picker;
+  $("detail").hidden = false; $("detail").dataset.sid = id;
+  $("detail").innerHTML = `<div class="panel">
+    <div class="kicker"><h2>${esc(s.cart ?? "Cart")} · ${label} · ${s.tote_slots ?? "-"} totes</h2><div>${grpBadge(s.group)}</div><span class="mono">SHORTEST-WALK ROUTE</span></div>
+    <div class="toolbar noprint"><span class="mono">Built ${new Date(s.created_at).toLocaleString("en-AU")}${s.created_by ? ` by ${esc(s.created_by)}` : ""}${s.picker ? ` · Picker ${esc(s.picker)}` : ""}${s.paused ? ` · ${s.picker ? "PAUSED" : "NEEDS A PICKER"} (${esc((s.pause_reason ?? "").replace(/_/g, " "))})` : ""}</span>
+      <span style="flex:1"></span><button class="ghost" id="printcart">Print pick list</button>${canRelease ? `<button class="ghost" id="releasecart">Unassign ${esc(s.picker)}</button>` : ""}${canCancel ? `<button class="ghost" id="cancelcart" style="color:var(--red);border-color:var(--red)">Take cart apart</button>` : ""}</div>
+    <h3 style="margin:10px 0 6px">Orders on this cart</h3>
+    <table><tr><th>Tote</th><th>Order</th><th>Customer</th><th>Service</th><th class="num">Picked</th><th>Status</th>${boss ? `<th class="noprint"></th>` : ""}</tr>
+      ${d.orders.map((o) => `<tr><td class="bin">${esc(o.tote ?? (o.slot ? `Tote ${o.slot}` : "scan at start"))}</td><td><b>#${esc(o.order_number)}</b>${o.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}${o.is_held ? ` <span class="chip amber">ON HOLD</span>` : ""}</td>
+        <td>${esc(o.customer ?? "")}</td><td>${esc(o.service ?? "")}</td><td class="num">${o.picked ?? 0}/${o.units ?? 0}</td><td>${esc(o.status.replace("_", " "))}</td>${boss ? `<td class="noprint"><button class="ghost" data-remove-num="${esc(o.order_number)}" style="min-height:34px;font-size:13px;padding:0 10px">Take off cart</button></td>` : ""}</tr>`).join("")}</table>
+    <h3 style="margin:14px 0 6px">Pick list (walking order)</h3>
+    <table class="picks"><tr><th class="num">#</th><th>Location</th><th></th><th>Product</th><th class="num">Qty</th><th class="num">Picked</th><th>Into tote / order</th></tr>
+      ${d.picks.map((p) => `<tr><td class="num">${p.seq}</td><td><span class="bin">${esc(p.bin)}</span>${p.bin_type !== "pick" ? `<div class="split">${esc(p.bin_type.toUpperCase())}</div>` : ""}</td>
+        <td>${p.image_url ? `<img src="${esc(p.image_url + (p.image_url.includes("?") ? "&" : "?") + "width=88")}" alt="">` : ""}</td>
+        <td><b>${esc(p.name)}</b>${p.variant ? ` <span class="mono">${esc(p.variant)}</span>` : ""}<div class="split">${esc(p.sku)}</div></td>
+        <td class="num"><b>${p.qty}</b></td><td class="num ${p.picked >= p.qty ? "ok" : p.status === "short" ? "bad" : ""}">${p.picked}${p.status === "short" ? " SHORT" : ""}</td>
+        <td class="split">${(p.split ?? []).map((x) => `${esc(x.tote ?? (x.slot ? "Tote " + x.slot : ""))} #${esc(x.order_number)} ×${x.qty}`).join("<br>")}</td></tr>`).join("")}</table></div>`;
+  $("printcart").onclick = () => window.print();
+  if (canRelease) $("releasecart").onclick = async () => {
+    const why = prompt(`Take ${s.cart} off ${s.picker}?\nThe cart stays together: its orders, totes and everything already picked stay on it, and any picker can scan it to carry on.\n\nReason (optional):`, "");
+    if (why === null) return;
+    const { data: r, error } = await sb.rpc("wms_release_cart", { p_session_id: id, p_reason: why || null });
+    if (error || !r.ok) { alert(error?.message ?? ({ FORBIDDEN: "Only supervisors and admins can do this.", NO_PICKER: "No picker on this cart." }[r.error] ?? r.error)); return; }
+    loadCarts(); openCart(id);
+  };
+  if (canCancel) $("cancelcart").onclick = () => takeApartBox(id);
+  $("detail").scrollIntoView({ behavior: "smooth" });
+}
+if (location.hash === "#carts") tab(2);
+</script>
+</body>
+</html>

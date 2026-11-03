@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  .login{max-width:420px;margin:8vh auto;padding:0 16px}
+  .login .panel{display:grid;gap:14px}
+  .pin{letter-spacing:.5em;font-size:24px;text-align:center}
+  .menu{display:grid;gap:10px;margin-top:16px}
+  .menu a{display:flex;justify-content:space-between;align-items:center;min-height:56px;padding:0 16px;background:var(--surface);border:1px solid var(--rule);color:var(--ink);text-decoration:none;font-weight:800}
+</style>
+</head>
+<body>
+<div class="bar"><span class="logo">TWL</span><span class="mono" style="color:#ccc">WAREHOUSE SYSTEM</span></div>
+<main class="login">
+  <section id="signin" class="panel" hidden>
+    <div class="kicker"><h2>Sign in</h2><span class="mono">WMS.01</span></div>
+    <label><span class="mono">Username</span><input id="u" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+    <label><span class="mono">6-digit PIN</span><input id="p" class="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password"></label>
+    <button id="go" class="signal">Sign in</button>
+    <div id="err" class="err"></div>
+  </section>
+  <section id="home" hidden>
+    <div class="panel"><div class="kicker"><h2 id="hello">Hi</h2><span class="mono" id="role"></span></div>
+      <div class="err" id="denied" hidden style="margin-bottom:8px">That screen isn't available for your login. Ask an admin if you need it.</div>
+      <nav class="menu">
+        <a href="/pick.html" data-page="pick" hidden>Picking (tablet) <span class="chip">PICK</span></a>
+        <a href="/stock.html" data-page="stock" hidden>Stock tools (tablet) <span class="chip">MOVE</span></a>
+        <a href="/orders.html" data-page="orders" hidden>Orders and carts <span class="chip">CARTS</span></a>
+        <a href="/pack.html" data-page="pack" hidden>Pack desk <span class="chip">PACK</span></a>
+        <a href="/search.html" data-page="search" hidden>Inventory search <span class="chip">FIND</span></a>
+        <a href="/tv.html" data-page="tv" hidden>Warehouse TV dashboard <span class="chip">SCREEN</span></a>
+        <a href="/history.html" data-page="history" hidden>Stock history (who changed what) <span class="chip">LOG</span></a>
+        <a href="/replenish.html" data-page="replenish" hidden>Replenishment report (top up shelves) <span class="chip">REPL</span></a>
+        <a href="/staff.html" data-page="staff" hidden>Staff and PINs <span class="chip">TEAM</span></a>
+        <a href="/settings.html" data-page="settings" hidden>Settings (carts, totes, locations) <span class="chip ink">SET</span></a>
+      </nav>
+      <details class="mypin" style="margin-top:14px"><summary class="mono" style="cursor:pointer;min-height:44px;display:flex;align-items:center">Change my PIN</summary>
+        <div style="display:grid;gap:8px;margin-top:8px">
+          <input id="np1" class="pin" type="password" inputmode="numeric" maxlength="6" placeholder="New PIN" autocomplete="new-password">
+          <input id="np2" class="pin" type="password" inputmode="numeric" maxlength="6" placeholder="Again" autocomplete="new-password">
+          <button id="savepin">Save new PIN</button>
+          <div id="pinmsg" class="err"></div>
+        </div>
+      </details>
+      <button class="ghost" id="out" style="margin-top:14px;width:100%">Sign out</button>
+    </div>
+  </section>
+  <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
+</main>
+<script type="module">
+import { sb, signIn, me, signOut, esc, validSession, clearLogin, canOpen } from "/js/app.js?v=5";
+const next = new URLSearchParams(location.search).get("next");
+let me_ = null;
+const show = (id) => { for (const s of ["signin","home"]) document.getElementById(s).hidden = s !== id; };
+async function home(m) {
+  if (next && canOpen(m.role, next.replace(/^\//, "").replace(/\.html$/, ""))) { location.href = next; return; }
+  if (m.role === "display") { location.href = "/tv.html"; return; }
+  document.getElementById("hello").textContent = `Hi ${m.name}`;
+  document.getElementById("role").textContent = m.role.toUpperCase();
+  // only show the screens this role can use
+  for (const a of document.querySelectorAll("[data-page]")) a.hidden = !canOpen(m.role, a.dataset.page);
+  const denied = new URLSearchParams(location.search).get("denied");
+  document.getElementById("denied").hidden = !denied;
+  me_ = m;
+  show("home");
+}
+if (new URLSearchParams(location.search).has("logout")) await clearLogin();
+const current = (await validSession()) ? await me() : null;
+current ? home(current) : show("signin");
+async function go() {
+  const e = document.getElementById("err"); e.textContent = "";
+  try { home(await signIn(document.getElementById("u").value, document.getElementById("p").value)); }
+  catch (x) { e.textContent = x.message; }
+}
+document.getElementById("go").onclick = go;
+document.getElementById("p").addEventListener("keydown", (ev) => { if (ev.key === "Enter") go(); });
+document.getElementById("out").onclick = signOut;
+document.getElementById("savepin").onclick = async () => {
+  const btn = document.getElementById("savepin");
+  if (btn.disabled) return;
+  const msg = document.getElementById("pinmsg"); msg.style.color = ""; msg.textContent = "";
+  const a = document.getElementById("np1").value.trim(), b = document.getElementById("np2").value.trim();
+  if (!/^\d{6}$/.test(a)) { msg.textContent = "PIN must be exactly 6 digits."; return; }
+  if (a !== b) { msg.textContent = "The two PINs don't match."; return; }
+  btn.disabled = true; btn.textContent = "Saving…";
+  const { data, error } = await sb.functions.invoke("staff-admin", { body: { action: "set_pin", username: me_.username, pin: a } });
+  if (error || !data?.ok) {
+    let why = "";
+    try { why = (await error.context.json()).error ?? ""; } catch {}
+    if (why === "NOT_SIGNED_IN") { await clearLogin(); location.href = "/index.html"; return; }
+    msg.textContent = "Could not save. Try again.";
+    btn.disabled = false; btn.textContent = "Save new PIN"; return;
+  }
+  // Changing a PIN signs you out everywhere, so sign in again with the new one.
+  await clearLogin();
+  location.href = "/index.html?pin=changed";
+};
+if (new URLSearchParams(location.search).get("pin") === "changed") {
+  const e = document.getElementById("err"); e.style.color = "var(--green)";
+  e.textContent = "PIN changed. Sign in with your new PIN.";
+}
+</script>
+</body>
+</html>

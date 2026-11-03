@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="mobile-web-app-capable" content="yes"><meta name="theme-color" content="#111111">
+<title>Stock tools · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<link rel="stylesheet" href="/css/tablet.css?v=6">
+<style>
+  .menu{display:grid;gap:10px}
+  .menu button{min-height:84px;font-size:22px;text-align:left;padding:0 20px;display:flex;justify-content:space-between;align-items:center}
+  .menu button small{font:600 13px "IBM Plex Mono",monospace;opacity:.75;text-transform:uppercase}
+  .row{display:grid;grid-template-columns:64px 1fr auto;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--rule);padding:10px}
+  .row img,.row .noimg{width:64px;height:64px;object-fit:cover;background:var(--panel)}
+  .row .q{font:900 30px "IBM Plex Mono",monospace;color:var(--ink);text-align:right}
+  .row .q small{display:block;font-size:12px;color:var(--muted)}
+  .steps{display:flex;gap:6px;flex-wrap:wrap}
+  .steps span{font:700 13px "IBM Plex Mono",monospace;padding:6px 10px;background:var(--panel);border:1px solid var(--rule);color:var(--muted)}
+  .steps span.on{background:var(--ink);color:#fff;border-color:var(--ink)} .steps span.done{background:var(--green);color:#fff;border-color:var(--green)}
+  .row.tap{cursor:pointer} .row .edit{font:800 13px Archivo,sans-serif;color:var(--blue);text-transform:uppercase;display:block;margin-top:4px}
+  .seg3{display:grid;grid-template-columns:repeat(3,1fr);border:2px solid var(--ink)}
+  .seg3 button{min-height:56px;font-size:18px;background:var(--surface);color:var(--ink);border:0;border-right:1px solid var(--rule)}
+  .seg3 button.on{background:var(--ink);color:#fff}
+  .nowafter{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .nowafter div{text-align:center} .nowafter b{display:block;font:900 44px/1 "IBM Plex Mono",monospace;color:var(--ink)}
+  .recent{font:500 14px "IBM Plex Mono",monospace;color:var(--muted);display:grid;gap:4px}
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc" id="hdr">STOCK TOOLS</span><span class="mono" style="color:#ccc" id="who"></span></div>
+<input id="scan" inputmode="none" autocomplete="off" autocapitalize="characters" spellcheck="false">
+<main id="app"></main>
+<div class="modal" id="modal" hidden><div class="panel" id="mpanel"></div></div>
+
+<script type="module">
+import { sb, requireLogin, signOut, esc, fmt, clearLogin, canOpen } from "/js/app.js?v=5";
+const me = await requireLogin();
+if (me?.role === "display") location.href = "/tv.html";
+const $ = (id) => document.getElementById(id);
+$("who").textContent = (me?.name ?? "").toUpperCase();
+const app = $("app"), scan = $("scan");
+
+let ac; const tone = (f, ms, n = 1) => { try { ac ??= new AudioContext(); for (let i = 0; i < n; i++) { const o = ac.createOscillator(), g = ac.createGain();
+  o.frequency.value = f; o.connect(g); g.connect(ac.destination); const t = ac.currentTime + i * (ms + 60) / 1000; g.gain.setValueAtTime(.25, t); o.start(t); o.stop(t + ms / 1000); } } catch {} };
+const good = () => tone(1300, 70), bad = () => { tone(200, 250, 3); navigator.vibrate?.([200, 80, 200]); }, done = () => { tone(900, 90); setTimeout(() => tone(1400, 160), 120); };
+
+let onScan = null;
+const keepFocus = () => { if ($("modal").hidden && !document.activeElement?.matches?.("input:not(#scan)")) scan.focus(); };
+setInterval(keepFocus, 800); document.addEventListener("click", () => setTimeout(keepFocus, 50));
+scan.addEventListener("keydown", (e) => { if (e.key !== "Enter") return; const v = scan.value.trim(); scan.value = ""; if (v && onScan) onScan(v); });
+async function rpc(fn, args) {
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) { if (/NOT_STAFF|JWT/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/stock.html"; } throw error; }
+  return data;
+}
+const msg = (text, kind = "") => { const m = $("msg"); if (m) { m.className = "msg " + kind; m.textContent = text; } };
+const ERR = { UNKNOWN_BIN: "Location not recognised.", UNKNOWN_BARCODE: "Product not recognised.", SAME_BIN: "That's the same location.",
+  BIN_INACTIVE: "That location is switched off.", CROSS_WAREHOUSE: "Locations are in different warehouses.", BIN_EMPTY: "That location is empty.", BAD_QTY: "Enter a quantity." };
+const typeBox = (ph) => `<div class="typebox"><input id="typed" placeholder="${ph}" autocapitalize="characters"><button id="gotype">OK</button></div>`;
+function wireType() { const go = () => { const v = $("typed").value.trim(); if (v && onScan) { $("typed").value = ""; onScan(v); } };
+  $("gotype").onclick = go; $("typed").addEventListener("keydown", (e) => { if (e.key === "Enter") go(); }); }
+const img = (u, w = 128) => u ? `<img src="${esc(u + (u.includes("?") ? "&" : "?") + "width=" + w)}" alt="">` : `<div class="noimg"></div>`;
+
+// ===================== MENU =====================
+async function menu(note, kind) {
+  $("hdr").textContent = "STOCK TOOLS"; onScan = (v) => lookup(v);
+  app.innerHTML = `<div class="menu">
+      <button class="signal" id="mMove">Move stock <small>location → location</small></button>
+      <button id="mAdj">Add / remove stock <small>in one location</small></button>
+      <button id="mMerge">Merge locations <small>empty one into another</small></button>
+      <button class="ghost" id="mLook">What's in a location? <small>scan a location</small></button>
+      <button class="ghost" id="mFind">Where is this item? <small>scan a product</small></button></div>
+    <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Or just scan a location or a product to look it up.")}</div>
+    <div class="step">Your moves and changes today</div><div class="recent" id="recent">Loading…</div>
+    <div class="btns">${canOpen(me?.role, "pick") ? `<a class="ghost tbtn" href="/pick.html">Back to picking</a>` : `<a class="ghost tbtn" href="/index.html">Menu</a>`}<button class="ghost" id="out">Sign out</button></div>`;
+  $("mMove").onclick = () => move(); $("mAdj").onclick = () => adjust(); $("mMerge").onclick = () => merge(); $("mLook").onclick = () => lookScreen(); $("mFind").onclick = () => findScreen();
+  $("out").onclick = signOut;
+  try { const r = await rpc("wms_my_recent_moves", { p_limit: 8 });
+    const tm = (t) => new Date(t).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
+    $("recent").innerHTML = r.length ? r.map((m) => m.kind === "adjust"
+      ? `<div>${tm(m.at)} · ${esc(m.sku)} ${m.qty > 0 ? "+" : "−"}${Math.abs(m.qty)} · ${esc(m.bin)} (now ${m.after}) · ${esc((m.reason ?? "").replace(/^(Stock tool|Pick count fix): /, ""))}</div>`
+      : `<div>${tm(m.at)} · ${esc(m.sku)} ×${m.qty} · ${esc(m.from ?? "?")} → ${esc(m.to ?? "?")}${m.kind === "merge" ? " (merge)" : ""}</div>`).join("") : "<div>None yet.</div>";
+  } catch { $("recent").textContent = ""; }
+}
+async function lookup(v) {   // scanned from the menu: location first, then product
+  const b = await rpc("wms_bin_contents", { p_bin: v });
+  if (b.ok) return showBin(b);
+  return showItem(v);
+}
+
+// ===================== LOOK UP =====================
+function lookScreen() { $("hdr").textContent = "WHAT'S IN A LOCATION";
+  app.innerHTML = `<div class="huge" style="font-size:40px">Scan a location</div>${typeBox("or type it, eg LG-04-02")}<div id="msg" class="msg"></div><button class="ghost" id="back">Back</button>`;
+  wireType(); $("back").onclick = () => menu();
+  onScan = async (v) => { try { const b = await rpc("wms_bin_contents", { p_bin: v }); if (!b.ok) { bad(); return msg(`${v}: location not recognised.`, "bad"); } good(); showBin(b); } catch (e) { bad(); msg(e.message, "bad"); } };
+}
+function showBin(b, note, kind) {
+  $("hdr").textContent = b.bin.code;
+  app.innerHTML = `<div class="loc"><div class="step">${esc(b.bin.type.toUpperCase())}${b.bin.active ? "" : " · SWITCHED OFF"} · ${b.items.length} SKU${b.items.length === 1 ? "" : "S"} · ${fmt(b.units)} UNITS</div><div class="big">${esc(b.bin.code)}</div></div>
+    <div class="list">${b.items.length ? b.items.map((i, ix) => `<div class="row tap" data-ix="${ix}">${img(i.image_url)}
+        <div><b>${esc(i.name)}</b> ${i.variant ? `<span class="mono">${esc(i.variant)}</span>` : ""}<div class="sku">${esc(i.sku)}</div>
+        ${i.other_bins.length ? `<div class="split">Also in: ${i.other_bins.slice(0, 4).map((o) => `${esc(o.bin)} (${o.qty})`).join(", ")}${i.other_bins.length > 4 ? "…" : ""}</div>` : ""}</div>
+        <div class="q">${i.on_hand}${i.allocated ? `<small>${i.allocated} reserved</small>` : ""}<span class="edit">Edit</span></div></div>`).join("") : `<div class="card">Empty.</div>`}</div>
+    <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Tap an item to change its count. Scan another location or product, or:")}</div>
+    <button class="signal" id="addhere" style="min-height:64px;font-size:18px">Add an item to ${esc(b.bin.code)}</button>
+    <div class="btns"><button id="mv">Move from here</button><button id="mg">Merge this location</button></div>
+    <button class="ghost" id="back">Back</button>`;
+  app.querySelectorAll("[data-ix]").forEach((r) => r.onclick = () => adjBox(b.bin.code, b.items[Number(r.dataset.ix)], "set", (res) => reopenBin(b.bin.code, res)));
+  $("addhere").onclick = () => adjust(b.bin.code);
+  $("mv").onclick = () => move(b.bin.code); $("mg").onclick = () => merge(b.bin.code); $("back").onclick = () => menu();
+  onScan = (v) => lookup(v);
+}
+async function reopenBin(code, res) {
+  const b = await rpc("wms_bin_contents", { p_bin: code });
+  showBin(b, `✓ ${res.sku} in ${res.bin}: ${res.before} → ${res.after}.`, "good");
+}
+function findScreen() { $("hdr").textContent = "WHERE IS THIS ITEM";
+  app.innerHTML = `<div class="huge" style="font-size:40px">Scan a product</div>${typeBox("or type a SKU")}<div id="msg" class="msg"></div><button class="ghost" id="back">Back</button>`;
+  wireType(); $("back").onclick = () => menu(); onScan = (v) => showItem(v);
+}
+// receiving / staging locations (eg 0-RECEIVE-01): offer "Put on shelf"
+const isReceiving = (b) => ["receiving", "staging"].includes(b.type) || /RECEIV/i.test(b.bin ?? "");
+async function showItem(v, note, kind) {
+  try {
+    const r = await rpc("wms_search_inventory", { p_query: v, p_limit: 5 });
+    if (!r.length) { bad(); return msg(`${v}: not recognised as a location or product.`, "bad"); }
+    good(); const p = r[0];
+    $("hdr").textContent = p.sku;
+    app.innerHTML = `<div class="card prod">${img(p.image_url, 280)}<div><div class="pname">${esc(p.name)}</div>${p.variant ? `<div class="pvar">${esc(p.variant)}</div>` : ""}<div class="psku">${esc(p.sku)}</div>
+        <div class="stat" style="margin-top:8px"><div><span class="mono">On hand</span><b>${fmt(p.on_hand)}</b></div><div><span class="mono">Available</span><b>${fmt(p.available)}</b></div></div></div></div>
+      <div class="step">Locations</div>
+      <div class="list">${p.bins.length ? p.bins.map((b, ix) => { const free = b.qty - (b.allocated ?? 0), recv = isReceiving(b);
+        return `<div class="row itemloc ${recv ? "recv" : ""}"><div class="mono">${esc((b.type ?? "").toUpperCase())}</div>
+          <div><div class="bin" style="font:900 26px 'IBM Plex Mono',monospace">${esc(b.bin)}</div>
+            ${free > 0 ? `<button class="${recv ? "signal" : "ghost"}" data-mv="${ix}" style="min-height:48px;font-size:16px;margin-top:6px">${recv ? `Put on shelf (${free})` : "Move from here"}</button>` : `<span class="split">All reserved for carts</span>`}</div>
+          <div class="q">${b.qty}${b.allocated ? `<small>${b.allocated} reserved</small>` : ""}</div></div>`; }).join("") : `<div class="card">No stock in any location.</div>`}</div>
+      <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Tap a location to move stock from it, or scan another product or location.")}</div><button class="ghost" id="back">Back</button>`;
+    app.querySelectorAll("[data-mv]").forEach((btn) => btn.onclick = () => { const b = p.bins[Number(btn.dataset.mv)];
+      move(b.bin, { product: p, max: b.qty - (b.allocated ?? 0), reserved: b.allocated ?? 0, back: p.sku }); });
+    $("back").onclick = () => menu(); onScan = (x) => lookup(x);
+  } catch (e) { bad(); msg(e.message, "bad"); }
+}
+
+// ===================== ADD / REMOVE: location -> product -> how many =====================
+function adjust(binCode) {
+  let bin = null;
+  const draw = (text, kind) => {
+    $("hdr").textContent = "ADD / REMOVE STOCK";
+    app.innerHTML = `<div class="steps"><span class="${bin ? "done" : "on"}">1. Location</span><span class="${bin ? "on" : ""}">2. Product</span><span>3. How many</span></div>
+      ${bin ? `<div class="loc ok"><div class="step">Location · ${bin.items.length} SKU${bin.items.length === 1 ? "" : "S"} · ${fmt(bin.units)} units</div><div class="big" style="font-size:44px">${esc(bin.bin.code)}</div></div>
+        ${bin.items.length ? `<div class="step">In here now (tap one, or scan any product)</div><div class="list">${bin.items.map((i, ix) => `<div class="row tap" data-ix="${ix}">${img(i.image_url)}<div><b>${esc(i.name)}</b> ${i.variant ? `<span class="mono">${esc(i.variant)}</span>` : ""}<div class="sku">${esc(i.sku)}</div></div><div class="q">${i.on_hand}<span class="edit">Change</span></div></div>`).join("")}</div>` : ""}` : ""}
+      <div class="card"><div class="huge" style="font-size:36px">${bin ? "Scan the product" : "Scan the location"}</div>${typeBox(bin ? "or type the SKU" : "or type the location, eg LG-04-02")}</div>
+      <div id="msg" class="msg ${kind ?? ""}">${esc(text ?? "")}</div>
+      <div class="btns"><button class="ghost" id="cancel">Done</button>${bin ? `<button class="ghost" id="other">Other location</button>` : "<span></span>"}</div>`;
+    wireType();
+    $("cancel").onclick = () => menu();
+    $("other")?.addEventListener("click", () => { bin = null; draw(); });
+    app.querySelectorAll("[data-ix]").forEach((r) => r.onclick = () => adjBox(bin.bin.code, bin.items[Number(r.dataset.ix)], "add", after));
+  };
+  const loadBin = async (v) => {
+    const b = await rpc("wms_bin_contents", { p_bin: v });
+    if (!b.ok) { bad(); return draw(`${v}: location not recognised.`, "bad"); }
+    good(); bin = b; draw(b.bin.active ? "" : "This location is switched off: you can only take stock out.", b.bin.active ? "" : "warn");
+  };
+  const after = async (res) => { done(); const b = await rpc("wms_bin_contents", { p_bin: res.bin }); bin = b;
+    draw(`✓ ${res.sku}: ${res.before} → ${res.after} in ${res.bin}. Scan the next product, or Done.`, "good"); };
+  onScan = async (v) => {
+    try {
+      if (!bin) return loadBin(v);
+      const here = bin.items.find((i) => i.sku.toUpperCase() === v.toUpperCase());
+      if (here) { good(); return adjBox(bin.bin.code, here, "add", after); }
+      const r = await rpc("wms_search_inventory", { p_query: v, p_limit: 1 });
+      const p = r[0];
+      if (!p) {   // maybe they scanned another location
+        const b = await rpc("wms_bin_contents", { p_bin: v });
+        if (b.ok) { good(); bin = b; return draw(); }
+        bad(); return draw(`${v}: product not recognised.`, "bad");
+      }
+      const inBin = bin.items.find((i) => i.sku === p.sku);
+      good(); adjBox(bin.bin.code, inBin ?? { sku: p.sku, name: p.name, variant: p.variant, image_url: p.image_url, on_hand: 0, allocated: 0 }, "add", after);
+    } catch (e) { bad(); draw(e.message, "bad"); }
+  };
+  if (binCode) loadBin(binCode); else draw();
+}
+
+// add / remove / set the count of one item in one location
+function adjBox(binCode, item, startMode, onDone) {
+  let mode = startMode, q = "", reason = "";
+  const now = item.on_hand ?? 0, res = item.allocated ?? 0;
+  const RS = { receiving: "Receiving stock", stocktake: "Stocktake", found: "Found stock", return: "Customer return", count_fix: "Count was wrong", damaged: "Damaged / faulty", other: "Other (write a note)" };
+  const draw = () => {
+    const n = Number(q || 0);
+    const after = mode === "add" ? now + n : mode === "remove" ? now - n : (q === "" ? now : n);
+    const change = after - now;
+    const list = change > 0 ? ["receiving", "stocktake", "found", "return", "count_fix", "other"] : change < 0 ? ["stocktake", "damaged", "count_fix", "other"] : [];
+    if (!list.includes(reason)) reason = "";
+    const problem = after < 0 ? `Only ${now} here.` : after < res ? `${res} are reserved for carts, so it can't go below ${res}.` : "";
+    $("mpanel").innerHTML = `<h2>${esc(item.sku)} in ${esc(binCode)}</h2>
+      <div class="mono">${esc(item.name ?? "")}${item.variant ? " · " + esc(item.variant) : ""}</div>
+      <div class="seg3">${[["add", "+ Add"], ["remove", "− Remove"], ["set", "Set count"]].map(([k, l]) => `<button data-m="${k}" class="${mode === k ? "on" : ""}">${l}</button>`).join("")}</div>
+      <div class="nowafter"><div><span class="step">Now</span><b>${now}</b></div>
+        <div><span class="step">${mode === "add" ? "Add" : mode === "remove" ? "Remove" : "New count"}</span><b>${q || (mode === "set" ? now : 0)}</b></div>
+        <div><span class="step">After</span><b style="color:${problem ? "var(--red)" : change ? "var(--green)" : "var(--ink)"}">${after}</b></div></div>
+      ${res ? `<div class="mono">${res} RESERVED FOR CARTS</div>` : ""}
+      <div class="pad">${[1,2,3,4,5,6,7,8,9].map((d) => `<button data-n="${d}">${d}</button>`).join("")}<button data-n="C">Clear</button><button data-n="0">0</button><button data-n="B">⌫</button></div>
+      ${problem ? `<div class="msg bad">${problem}</div>` : ""}
+      ${list.length && !problem ? `<div class="step">Why?</div><div class="opts">${list.map((k) => `<button data-r="${k}" class="${k === reason ? "on" : ""}">${RS[k]}</button>`).join("")}</div>
+        ${reason === "other" ? `<input id="note" placeholder="What happened?" style="font-size:18px">` : ""}<div class="mono">Recorded against your name.</div>` : ""}
+      <div class="btns"><button class="ghost" id="ano">Cancel</button><button class="signal" id="ayes" disabled>${change > 0 ? `Add ${change}` : change < 0 ? `Remove ${-change}` : "Save"}</button></div>`;
+    $("mpanel").querySelectorAll("[data-m]").forEach((b) => b.onclick = () => { mode = b.dataset.m; q = ""; draw(); });
+    $("mpanel").querySelectorAll("[data-n]").forEach((b) => b.onclick = () => { const d = b.dataset.n;
+      q = d === "C" ? "" : d === "B" ? q.slice(0, -1) : (q + d).replace(/^0+(?=\d)/, "").slice(0, 5); draw(); });
+    $("mpanel").querySelectorAll("[data-r]").forEach((b) => b.onclick = () => { reason = b.dataset.r; draw(); });
+    const ok = () => { $("ayes").disabled = !(change && !problem && reason && (reason !== "other" || $("note")?.value.trim())); };
+    $("note")?.addEventListener("input", ok); ok();
+    $("ano").onclick = () => { $("modal").hidden = true; };
+    $("ayes").onclick = async () => { $("ayes").disabled = true;
+      try {
+        const r = await rpc("wms_adjust_stock", { p_bin: binCode, p_product: item.sku, p_mode: mode, p_qty: mode === "set" ? after : n, p_reason: reason, p_note: $("note")?.value.trim() || null });
+        $("modal").hidden = true;
+        if (!r.ok) { bad(); return msg(r.error === "BELOW_RESERVED" ? `${r.reserved} are reserved for carts: can't go below that.` : r.error === "NOT_ENOUGH" ? `Only ${r.on_hand} here.`
+          : ({ ...ERR, NOTE_REQUIRED: "Write a note.", BAD_REASON: "Pick a reason.", REASON_WRONG_WAY: "That reason doesn't fit this change. Pick another." }[r.error] ?? r.error), "bad"); }
+        onDone(r);
+      } catch (e) { $("modal").hidden = true; bad(); msg(e.message, "bad"); } };
+  };
+  draw(); $("modal").hidden = false;
+}
+
+// ===================== MOVE: from -> product -> qty -> to =====================
+function move(fromCode, pre) {
+  const m = { from: fromCode ?? null, product: pre?.product ?? null, sku: pre?.product?.sku ?? null, qty: null, max: pre?.max ?? null, reserved: pre?.reserved ?? 0 };
+  const STEPS = ["From", "Product", "Qty", "To"];
+  const draw = (text, kind) => {
+    const step = !m.from ? 0 : !m.product ? 1 : !m.qty ? 2 : 3;
+    $("hdr").textContent = "MOVE STOCK";
+    app.innerHTML = `<div class="steps">${STEPS.map((s, i) => `<span class="${i < step ? "done" : i === step ? "on" : ""}">${i + 1}. ${s}</span>`).join("")}</div>
+      ${m.from ? `<div class="loc ok"><div class="step">From</div><div class="big" style="font-size:44px">${esc(m.from)}</div></div>` : ""}
+      ${m.product ? `<div class="card"><div class="step">Product</div><div class="pname">${esc(m.product.name)}</div>${m.product.variant ? `<div class="pvar">${esc(m.product.variant)}</div>` : ""}<div class="psku">${esc(m.sku)} · ${m.max} free here${m.reserved ? ` · ${m.reserved} reserved (can't move)` : ""}</div></div>` : ""}
+      ${m.qty ? `<div class="card"><div class="step">Quantity</div><div class="huge" style="font-size:56px">${m.qty}</div></div>` : ""}
+      <div class="card"><div class="huge" style="font-size:36px">${["Scan the location you're taking stock FROM", "Scan the product", "How many?", "Scan the location you're putting it INTO"][step]}</div>
+        ${step === 2 ? "" : typeBox(["or type the location", "or type the SKU", "", "or type the location"][step])}
+        ${step === 3 ? shelfHint() : ""}</div>
+      <div id="msg" class="msg ${kind ?? ""}">${esc(text ?? "")}</div>
+      <div class="btns"><button class="ghost" id="cancel">Cancel</button>${step > 0 ? `<button class="ghost" id="backstep">Back a step</button>` : "<span></span>"}</div>`;
+    if (step !== 2) wireType();
+    $("cancel").onclick = () => pre?.back ? showItem(pre.back, "Move cancelled.") : menu("Move cancelled.");
+    $("backstep")?.addEventListener("click", () => { if (m.qty) m.qty = null; else if (m.product) m.product = null; else m.from = null; draw(); });
+    if (step === 2) qtyPad(m.max, (n) => { m.qty = n; draw(); }, () => pre?.back ? showItem(pre.back, "Move cancelled.") : menu("Move cancelled."));
+  };
+  // where this product already lives (its shelf), so the picker knows where to take it
+  function shelfHint() {
+    const others = (m.product?.bins ?? []).filter((b) => b.bin !== m.from && !isReceiving(b))
+      .sort((a, b) => (a.type === "pick" ? 0 : 1) - (b.type === "pick" ? 0 : 1) || b.qty - a.qty);
+    return others.length ? `<div class="shelfhint"><span class="step">Already stored in</span>${others.slice(0, 4).map((b) =>
+        `<span class="sh"><b>${esc(b.bin)}</b> ${b.qty} ${b.type === "pick" ? "· PICK" : esc((b.type ?? "").toUpperCase())}</span>`).join("")}<span class="split">Scan the location label when you get there.</span></div>`
+      : `<div class="shelfhint"><span class="step">Not stored on a shelf yet</span><span class="split">Scan the location you're putting it into.</span></div>`;
+  }
+  onScan = async (v) => {
+    try {
+      if (!m.from) {
+        const b = await rpc("wms_bin_contents", { p_bin: v });
+        if (!b.ok) { bad(); return draw(`${v}: location not recognised.`, "bad"); }
+        if (!b.items.length) { bad(); return draw(`${b.bin.code} is empty.`, "bad"); }
+        good(); m.from = b.bin.code; m.items = b.items; return draw();
+      }
+      if (!m.product) {
+        const r = await rpc("wms_search_inventory", { p_query: v, p_limit: 1 });
+        const p = r[0];
+        const here = p && (m.items ?? []).find((i) => i.sku === p.sku);
+        if (!p) { bad(); return draw(`${v}: product not recognised.`, "bad"); }
+        if (!here) { bad(); return draw(`${p.sku} is not in ${m.from}.`, "bad"); }
+        if (here.free < 1) { bad(); return draw(`All ${here.on_hand} of ${p.sku} in ${m.from} are reserved for a cart.`, "bad"); }
+        good(); m.product = p; m.sku = p.sku; m.max = here.free; m.reserved = here.allocated; return draw();
+      }
+      if (!m.qty) return;
+      // check the destination first, then ask the person to confirm the move
+      const to = await rpc("wms_bin_contents", { p_bin: v });
+      if (!to.ok) { bad(); return draw(`${v}: location not recognised.`, "bad"); }
+      if (to.bin.code === m.from) { bad(); return draw("That's the same location you're moving from.", "bad"); }
+      if (!to.bin.active) { bad(); return draw(`${to.bin.code} is switched off.`, "bad"); }
+      good();
+      const already = to.items.find((i) => i.sku === m.sku)?.on_hand ?? 0;
+      $("mpanel").innerHTML = `<h2>Confirm the move</h2>
+        <div class="card" style="display:grid;gap:10px">
+          <div style="font-size:22px">Move <b style="font-size:34px">${m.qty}</b> × <b>${esc(m.sku)}</b></div>
+          <div class="pvar" style="font-size:16px">${esc(m.product?.name ?? "")}${m.product?.variant ? " · " + esc(m.product.variant) : ""}</div>
+          <div class="mvrow"><div><span class="step">From</span><b>${esc(m.from)}</b><span class="split">${m.max} free → ${m.max - m.qty} after</span></div>
+            <div class="arrow">→</div>
+            <div><span class="step">To</span><b>${esc(to.bin.code)}</b><span class="split">${already} now → ${already + m.qty} after</span></div></div></div>
+        <div class="btns"><button class="ghost" id="mvno">Cancel</button><button class="signal" id="mvyes">Yes, move ${m.qty}</button></div>`;
+      $("modal").hidden = false;
+      $("mvno").onclick = () => { $("modal").hidden = true; draw("Move not done. Scan the location you're putting it into, or Back a step."); };
+      $("mvyes").onclick = async () => {
+        $("mvyes").disabled = true;
+        try {
+          const r = await rpc("wms_move_stock", { p_from_bin: m.from, p_product_barcode: m.sku, p_qty: m.qty, p_to_bin: to.bin.code });
+          $("modal").hidden = true;
+          if (!r.ok) { bad(); return draw(r.error === "INSUFFICIENT_STOCK" ? `Only ${r.available} free in ${m.from}.` : (ERR[r.error] ?? r.error) + (r.scanned ? ` (${r.scanned})` : ""), "bad"); }
+          done();
+          const okMsg = `✓ Moved ${r.qty} × ${r.sku}: ${r.from} (now ${r.from_after}) → ${r.to} (now ${r.to_after}).`;
+          pre?.back ? showItem(pre.back, okMsg, "good") : menu(okMsg, "good");
+        } catch (e) { $("modal").hidden = true; bad(); draw(e.message, "bad"); }
+      };
+    } catch (e) { bad(); draw(e.message, "bad"); }
+  };
+  draw(pre ? "" : fromCode ? "Scan the product." : "");
+}
+function qtyPad(max, cb, onCancel) {
+  let q = String(max);
+  const draw = () => { $("mpanel").innerHTML = `<h2>How many?</h2><div class="qtyshow">${q || "0"}</div><div class="mono" style="text-align:center">${max} FREE IN THIS LOCATION</div>
+    <div class="pad">${[1,2,3,4,5,6,7,8,9].map((n) => `<button data-n="${n}">${n}</button>`).join("")}<button data-n="C">Clear</button><button data-n="0">0</button><button data-n="A">All ${max}</button></div>
+    <div class="btns"><button class="ghost" id="qno">Cancel</button><button class="signal" id="qyes">Move ${q || 0}</button></div>`;
+    $("mpanel").onclick = (e) => { const b = e.target.closest("[data-n]"); if (!b) return; const n = b.dataset.n;
+      q = n === "C" ? "" : n === "A" ? String(max) : (q === String(max) ? n : (q + n).replace(/^0+/, "")); draw(); };
+    $("qno").onclick = () => { $("modal").hidden = true; onCancel ? onCancel() : menu("Move cancelled."); };
+    $("qyes").onclick = () => { const n = Number(q); if (!n) return; if (n > max) { q = String(max); return draw(); } $("modal").hidden = true; cb(n); }; };
+  draw(); $("modal").hidden = false;
+}
+
+// ===================== MERGE: from -> to -> confirm =====================
+function merge(fromCode) {
+  let from = null, items = [];
+  const draw = (text, kind) => {
+    $("hdr").textContent = "MERGE LOCATIONS";
+    app.innerHTML = `<div class="steps"><span class="${from ? "done" : "on"}">1. Empty this one</span><span class="${from ? "on" : ""}">2. Into this one</span></div>
+      ${from ? `<div class="loc ok"><div class="step">Empty</div><div class="big" style="font-size:44px">${esc(from)}</div></div>
+        <div class="list">${items.map((i) => `<div class="row">${img(i.image_url)}<div><b>${esc(i.name)}</b><div class="sku">${esc(i.sku)}</div></div><div class="q">${i.free}${i.allocated ? `<small>${i.allocated} reserved stay</small>` : ""}</div></div>`).join("")}</div>` : ""}
+      <div class="card"><div class="huge" style="font-size:34px">${from ? "Scan the location to move it all INTO" : "Scan the location to EMPTY"}</div>${typeBox("or type the location")}</div>
+      <div id="msg" class="msg ${kind ?? ""}">${esc(text ?? "")}</div>
+      <div class="btns"><button class="ghost" id="cancel">Cancel</button><span></span></div>`;
+    wireType(); $("cancel").onclick = () => menu("Merge cancelled.");
+  };
+  const loadFrom = async (v) => {
+    const b = await rpc("wms_bin_contents", { p_bin: v });
+    if (!b.ok) { bad(); return draw(`${v}: location not recognised.`, "bad"); }
+    if (!b.items.length) { bad(); return draw(`${b.bin.code} is already empty.`, "bad"); }
+    good(); from = b.bin.code; items = b.items; draw(`${b.items.length} SKU(s), ${b.units} units.`);
+  };
+  onScan = async (v) => {
+    try {
+      if (!from) return loadFrom(v);
+      const to = await rpc("wms_bin_contents", { p_bin: v });
+      if (!to.ok) { bad(); return draw(`${v}: location not recognised.`, "bad"); }
+      if (to.bin.code === from) { bad(); return draw("That's the same location.", "bad"); }
+      const units = items.reduce((a, i) => a + i.free, 0);
+      $("mpanel").innerHTML = `<h2>Merge ${esc(from)} into ${esc(to.bin.code)}?</h2>
+        <p style="font-size:18px">${units} unit(s) of ${items.filter((i) => i.free > 0).length} SKU(s) move into <b>${esc(to.bin.code)}</b> (${to.items.length} SKU(s) there now).
+        ${items.some((i) => i.allocated) ? "Stock reserved for a cart stays where it is." : ""}</p>
+        <div class="btns"><button class="ghost" id="no">Cancel</button><button class="signal" id="yes">Merge</button></div>`;
+      $("modal").hidden = false;
+      $("no").onclick = () => { $("modal").hidden = true; };
+      $("yes").onclick = async () => { $("modal").hidden = true;
+        const r = await rpc("wms_merge_bins", { p_from_bin: from, p_to_bin: to.bin.code, p_confirmed: true });
+        if (!r.ok) { bad(); return draw(ERR[r.error] ?? r.error, "bad"); }
+        done(); menu(`✓ Merged ${r.units} unit(s) from ${r.from} into ${r.to}.${r.kept.length ? ` Kept back (reserved): ${r.kept.map((k) => `${k.sku} ×${k.qty}`).join(", ")}.` : ""}`, "good"); };
+    } catch (e) { bad(); draw(e.message, "bad"); }
+  };
+  if (fromCode) loadFrom(fromCode); else draw();
+}
+
+const start = new URLSearchParams(location.search).get("do");
+start === "move" ? move() : start === "merge" ? merge() : start === "adjust" ? adjust() : menu();
+</script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Inventory search · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  .searchrow{display:grid;grid-template-columns:1fr auto;gap:8px}
+  #q{font-size:20px;min-height:56px}
+  .opts{display:flex;gap:16px;align-items:center;margin-top:8px}
+  .opts label{display:flex;gap:8px;align-items:center;min-height:44px}
+  .opts input{width:22px;min-height:22px}
+  .result{display:grid;grid-template-columns:72px 1fr auto;gap:14px;padding:14px;background:var(--surface);border:1px solid var(--rule);margin-top:8px}
+  .result img{width:72px;height:72px;object-fit:cover;background:var(--panel)}
+  .noimg{width:72px;height:72px;background:var(--panel);display:grid;place-items:center}
+  .sku{font:600 14px "IBM Plex Mono",monospace}
+  .name{font-weight:800;color:var(--ink)}
+  .qty{text-align:right;min-width:90px}
+  .qty b{font-size:28px;color:var(--ink);display:block;line-height:1}
+  .bins{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .bin{font:600 13px "IBM Plex Mono",monospace;border:1px solid var(--rule);padding:4px 6px;background:var(--panel)}
+  .bin b{color:var(--ink)}
+  @media (max-width:640px){.result{grid-template-columns:56px 1fr}.result img,.noimg{width:56px;height:56px}.qty{grid-column:2;text-align:left}}
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc">INVENTORY SEARCH</span><button class="ghost" id="out" style="border-color:#fff">Sign out</button></div>
+<main class="wrap">
+  <div class="kicker"><h2>Find stock</h2><span class="mono">INV.01</span></div>
+  <div class="searchrow">
+    <input id="q" placeholder="Scan a barcode, or type a SKU or product name" autofocus autocomplete="off" spellcheck="false">
+    <button id="go">Search</button>
+  </div>
+  <div class="opts"><label><input type="checkbox" id="instock"> <span>In stock only</span></label><span class="mono" id="count"></span></div>
+  <div id="err" class="err"></div>
+  <div id="results"></div>
+  <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
+</main>
+<script type="module">
+import { sb, requireLogin, signOut, esc, fmt } from "/js/app.js?v=5";
+await requireLogin();
+const q = document.getElementById("q"), out = document.getElementById("results");
+const TYPE = { pick: "PICK", backfill: "BACKSTOCK", reserved: "RESERVED", receiving: "RECEIVING", staging: "STAGING", quarantine: "QUARANTINE" };
+let timer, seq = 0;
+async function run() {
+  const term = q.value.trim(); const my = ++seq;
+  document.getElementById("err").textContent = "";
+  if (term.length < 2) { out.innerHTML = ""; document.getElementById("count").textContent = ""; return; }
+  const { data, error } = await sb.rpc("wms_search_inventory", { p_query: term, p_limit: 50, p_in_stock_only: document.getElementById("instock").checked });
+  if (my !== seq) return;                       // a newer search has started
+  if (error) { document.getElementById("err").textContent = error.message; return; }
+  document.getElementById("count").textContent = data.length === 50 ? "FIRST 50 RESULTS" : `${data.length} RESULTS`;
+  out.innerHTML = data.length ? data.map(card).join("") : `<p class="panel" style="margin-top:8px">No products match "${esc(term)}".</p>`;
+}
+function card(p) {
+  const img = p.image_url ? `<img src="${esc(p.image_url + (p.image_url.includes("?") ? "&" : "?") + "width=144")}" alt="" loading="lazy">` : `<div class="noimg mono">NO IMG</div>`;
+  const bins = p.bins.length ? p.bins.map(b => `<span class="bin">${esc(b.bin)} <b>${fmt(b.qty)}</b>${b.type !== "pick" ? ` · ${TYPE[b.type] ?? b.type.toUpperCase()}` : ""}${b.allocated ? ` · ${fmt(b.allocated)} ALLOC` : ""}</span>`).join("")
+                             : `<span class="mono">[NO STOCK IN ANY BIN]</span>`;
+  return `<article class="result">${img}
+    <div><div class="sku">${esc(p.sku)} ${p.active ? "" : '<span class="chip ink">INACTIVE</span>'}</div>
+      <div class="name">${esc(p.name)}</div>${p.variant ? `<div>${esc(p.variant)}</div>` : ""}
+      <div class="mono" style="margin-top:4px">${(p.barcodes ?? []).filter(b => b !== p.sku).map(esc).join(" · ")}</div>
+      <div class="bins">${bins}</div></div>
+    <div class="qty"><b>${fmt(p.available)}</b><span class="mono">AVAILABLE</span><div class="mono" style="margin-top:6px">${fmt(p.on_hand)} ON HAND</div></div>
+  </article>`;
+}
+q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 250); });
+q.addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(timer); run(); q.select(); } });   // scanners send Enter
+document.getElementById("go").onclick = run;
+document.getElementById("instock").onchange = run;
+document.getElementById("out").onclick = signOut;
+</script>
+</body>
+</html>

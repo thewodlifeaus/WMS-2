@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pack desk · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  body{min-height:100vh}
+  .deskbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--rule)}
+  .deskbar .pill{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface);border:1px solid var(--rule);font-weight:700}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--red);display:inline-block}
+  .dot.ok{background:var(--green)} .dot.warn{background:var(--amber)}
+  .deskbar button{min-height:34px;padding:0 10px;font-size:13px}
+  .grid{display:grid;grid-template-columns:1fr 380px;gap:16px;padding:16px;max-width:1400px;margin:0 auto}
+  @media (max-width:1000px){.grid{grid-template-columns:1fr}}
+  #scan{font:600 22px "IBM Plex Mono",monospace;min-height:60px;text-transform:uppercase}
+  .msg{margin-top:10px;padding:14px 16px;font-weight:800;font-size:18px;border-left:6px solid var(--blue);background:var(--surface)}
+  .msg.bad{border-color:var(--red);background:#fbeaea;color:var(--red)}
+  .msg.good{border-color:var(--green);background:#e8f3ec;color:var(--green)}
+  .msg.warn{border-color:var(--amber);background:#fbf3e3;color:#6b4a10}
+  .ohead{display:flex;justify-content:space-between;gap:12px;align-items:baseline;flex-wrap:wrap}
+  .ohead h1{font-size:34px}
+  .count{font:600 28px "IBM Plex Mono",monospace;color:var(--ink)}
+  .line{display:grid;grid-template-columns:64px 1fr auto;gap:12px;align-items:center;padding:10px;background:var(--surface);border:1px solid var(--rule);margin-top:6px}
+  .line img,.noimg{width:64px;height:64px;object-fit:cover;background:var(--panel)}
+  .line.done{opacity:.55} .line.done .q{color:var(--green)}
+  .line.flash{outline:3px solid var(--green)}
+  .q{font:600 26px "IBM Plex Mono",monospace;color:var(--ink);text-align:right;min-width:90px}
+  .sku{font:600 13px "IBM Plex Mono",monospace;color:var(--muted)}
+  .side .panel{margin-bottom:12px}
+  .weight{font:600 54px/1 "IBM Plex Mono",monospace;color:var(--ink);text-align:center;padding:14px 0}
+  .weight small{font-size:18px;color:var(--muted)}
+  #ship{width:100%;min-height:84px;font-size:28px;letter-spacing:.02em}
+  #ship:disabled{background:var(--rule);border-color:var(--rule);color:var(--muted);cursor:not-allowed}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .test{background:var(--amber);color:#111;font-weight:900;text-align:center;padding:6px;letter-spacing:.06em}
+  .setup ol{margin:8px 0 0 20px;display:grid;gap:6px}
+  code{font:600 12px "IBM Plex Mono",monospace;background:var(--surface);border:1px solid var(--rule);padding:2px 4px;word-break:break-all}
+  .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
+  .modal .panel{max-width:520px;width:100%}
+  .modal h2{margin-bottom:8px}
+  .choose{display:grid;gap:6px;margin-top:8px}
+  .choose button{min-height:52px;text-align:left;font-size:18px}
+  .flags{margin-top:10px;padding:14px 16px;background:#fbeaea;border-left:8px solid var(--red);color:var(--red)}
+  .flags h3{color:var(--red);font-size:18px;margin-bottom:6px}
+  .flags.amberflag{background:#fbf3e3;border-left-color:var(--amber);color:#6b4a10}
+  .flags.amberflag h3{color:#6b4a10} .flags.amberflag li{color:#4a3208}
+  .flags li{margin-left:18px;font-weight:700;color:#5a1010}
+  .flags .note{color:#6b4a10;font-weight:700}
+  .flags .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .flags button{min-height:40px}
+  .lineflag{display:inline-block;margin-top:4px;font:700 12px "IBM Plex Mono",monospace;background:var(--red);color:#fff;padding:3px 6px}
+  .lineflag.amber{background:var(--amber);color:#111}
+  .passbtn{min-height:36px;padding:0 10px;font-size:13px;margin-top:6px}
+  .mp-prod{display:grid;grid-template-columns:96px 1fr;gap:12px;align-items:center;padding:10px;background:var(--surface);border:1px solid var(--rule);margin:10px 0}
+  .mp-prod img,.mp-prod .noimg{width:96px;height:96px;object-fit:cover}
+  .mp-warn{background:#fbeaea;border-left:6px solid var(--red);color:var(--red);padding:12px;font-weight:800;margin:10px 0}
+  .mp-check{display:flex;gap:10px;align-items:flex-start;font-weight:700;margin:10px 0}
+  .mp-check input{width:24px;min-height:24px;flex:none;margin-top:2px}
+  #mp .row2 button.danger{background:var(--red);border-color:var(--red);color:#fff}
+  #mp .row2 button:disabled{background:var(--rule);border-color:var(--rule);color:var(--muted);cursor:not-allowed}
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc">PACK DESK</span><button class="ghost" id="out">Sign out</button></div>
+<div id="testbanner" class="test" hidden>TEST MODE · LABELS ARE FREE TEST LABELS · NOTHING IS SENT TO CUSTOMERS</div>
+<div class="deskbar">
+  <span class="pill"><span class="dot" id="deskdot"></span><span id="deskname">No desk set</span></span>
+  <span class="pill"><span class="dot" id="scaledot"></span><span id="scalename">Scale not connected</span></span>
+  <span class="pill"><span class="dot ok"></span><span>Printer: this computer's default</span></span>
+  <button class="ghost" id="connectscale">Connect scale</button>
+  <button class="ghost" id="testprint">Test print</button>
+  <button class="ghost" id="changedesk" hidden>Change desk</button>
+  <span class="mono" style="margin-left:auto" id="who"></span>
+</div>
+
+<main class="grid">
+  <section>
+    <input id="scan" placeholder="Scan tote or order number" autocomplete="off" spellcheck="false" autofocus>
+    <div id="msg" class="msg">Scan a tote, or the order number on the packing slip.</div>
+    <div id="choose" class="choose" hidden></div>
+    <div id="order" style="margin-top:14px" hidden>
+      <div class="ohead"><h1 id="onum"></h1><span class="count" id="ocount"></span></div>
+      <div class="mono" id="ometa"></div>
+      <div id="flags"></div>
+      <div id="lines"></div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <div class="panel">
+      <div class="kicker"><h2>Weight</h2><span class="mono" id="wsrc">SCALE</span></div>
+      <div class="weight" id="weight">-- <small>g</small></div>
+      <label id="manualbox" hidden><span class="mono">Type weight in grams (no scale)</span><input id="manual" inputmode="numeric" placeholder="eg 640"></label>
+    </div>
+    <button class="signal" id="ship" disabled>SHIP</button>
+    <div class="row2">
+      <button class="ghost" id="reprint" disabled>Reprint label</button>
+      <button class="ghost" id="cancelorder" disabled>Next order</button>
+    </div>
+    <div class="panel setup" style="margin-top:12px" id="setuphelp">
+      <div class="kicker"><h2>Desk set up</h2><span class="mono">ONCE PER PC</span></div>
+      <ol>
+        <li>Set the label printer as this PC's <b>default printer</b> (Windows Settings → Printers).</li>
+        <li>Make a desktop shortcut with this target, so labels print without a pop-up:<br>
+          <code>"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk-printing --user-data-dir=C:\TWLWMS\chrome --app=https://wms-nu-topaz.vercel.app/pack</code></li>
+        <li>Open the shortcut, sign in, choose the desk, click <b>Connect scale</b>, then <b>Test print</b>.</li>
+      </ol>
+    </div>
+  </aside>
+</main>
+
+<div class="modal" id="mp" hidden><div class="panel">
+  <h2>Pass this item by hand?</h2>
+  <div class="mp-prod" id="mpprod"></div>
+  <div class="mp-warn">Only pass this item if you are absolutely sure it is the correct product, size and colour.
+    Every manual pass is recorded against your name. Passing incorrect products may result in disciplinary action.</div>
+  <label><span class="mono">Why can't it be scanned?</span>
+    <select id="mpreason"><option value="">Choose a reason…</option>
+      <option value="no_barcode">Item has no barcode</option>
+      <option value="damaged_label">Barcode label damaged or missing</option>
+      <option value="barcode_not_recognised">Barcode not recognised by the WMS</option>
+      <option value="scanner_fault">Scanner not working</option>
+      <option value="other">Other (write a note)</option></select></label>
+  <label id="mpnotebox" hidden style="margin-top:8px;display:block"><span class="mono">Note</span><input id="mpnote" maxlength="200"></label>
+  <label class="mp-check"><input type="checkbox" id="mpok"><span>I have checked the item in my hand. It is exactly this product, size and colour.</span></label>
+  <div class="row2"><button class="ghost" id="mpno">Cancel</button><button class="danger" id="mpyes" disabled>Yes, pass 1 unit</button></div>
+</div></div>
+
+<div class="modal" id="modal" hidden><div class="panel"><h2 id="mtitle"></h2><p id="mbody" style="margin-bottom:14px"></p><div class="row2"><button class="ghost" id="mno">Cancel</button><button class="signal" id="myes">OK</button></div></div></div>
+
+<script type="module">
+import { sb, requireLogin, signOut, esc, clearLogin } from "/js/app.js?v=5";
+const me = await requireLogin();
+if (me?.role === "display") location.href = "/tv.html";
+const boss = ["admin", "supervisor"].includes(me?.role);
+document.getElementById("out").onclick = signOut;
+document.getElementById("who").textContent = `${me?.name ?? ""} · ${me?.role?.toUpperCase() ?? ""}`;
+const $ = (id) => document.getElementById(id);
+const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+
+// ---------- sounds ----------
+let ac; const beep = (f, ms, n = 1) => { try { ac ??= new AudioContext(); for (let i = 0; i < n; i++) { const o = ac.createOscillator(), g = ac.createGain();
+  o.frequency.value = f; o.connect(g); g.connect(ac.destination); const t = ac.currentTime + i * (ms + 60) / 1000; g.gain.setValueAtTime(.2, t); o.start(t); o.stop(t + ms / 1000); } } catch {} };
+const good = () => beep(1200, 70), bad = () => beep(220, 220, 3), done = () => { beep(900, 90); setTimeout(() => beep(1400, 140), 120); };
+function say(text, kind = "") { const m = $("msg"); m.className = "msg " + kind; m.textContent = text; }
+function ask(title, body, yes = "OK") {
+  return new Promise((res) => { $("mtitle").textContent = title; $("mbody").textContent = body; $("myes").textContent = yes; $("modal").hidden = false;
+    $("myes").onclick = () => { $("modal").hidden = true; res(true); }; $("mno").onclick = () => { $("modal").hidden = true; res(false); }; $("myes").focus(); });
+}
+
+let view = null, lastShipment = store.get("wms.lastShipment");
+
+// ---------- desk (locked to this PC) ----------
+let desk = store.get("wms.desk");
+async function chooseDesk() {
+  const { data, error } = await sb.rpc("wms_pack_desks");
+  if (error) { say(error.message, "bad"); return; }
+  const list = data.map((d, i) => `${i + 1}. ${d.name} (${d.code})`).join("\n");
+  const pick = prompt(`Which desk is this PC?\n\n${list}\n\nType the number:`);
+  const d = data[Number(pick) - 1];
+  if (d) { desk = d; store.set("wms.desk", d); }
+  showDesk();
+}
+function showDesk() {
+  $("deskname").textContent = desk ? `${desk.name} (${desk.code})` : "No desk set";
+  $("deskdot").className = "dot" + (desk ? " ok" : "");
+  $("changedesk").hidden = !(boss || !desk);
+  $("changedesk").textContent = desk ? "Change desk" : "Choose desk";
+}
+$("changedesk").onclick = chooseDesk;
+showDesk();
+if (!desk) chooseDesk();
+
+// ---------- USB scale (Chrome WebHID; remembered per PC) ----------
+let grams = null, stable = false, scaleDev = null;
+const UNIT = { 1: 0.001, 2: 1, 3: 1000, 11: 28.3495, 12: 453.592 };
+function onReport(e) {
+  const d = e.data; if (d.byteLength < 5) return;
+  const status = d.getUint8(0), unit = d.getUint8(1), exp = d.getInt8(2), raw = d.getUint16(3, true);
+  const g = status === 2 ? 0 : raw * Math.pow(10, exp) * (UNIT[unit] ?? 1);
+  grams = status === 5 ? 0 : Math.round(g); stable = status === 4 || status === 2;
+  showWeight();
+}
+async function useScale(dev) {
+  try { if (!dev.opened) await dev.open(); } catch (e) { say("Scale found but could not open: " + e.message, "warn"); return; }
+  scaleDev = dev; dev.oninputreport = onReport;
+  store.set("wms.scale", { vendorId: dev.vendorId, productId: dev.productId, name: dev.productName });
+  $("scalename").textContent = dev.productName || "USB scale"; $("scaledot").className = "dot ok";
+  $("manualbox").hidden = true; $("wsrc").textContent = "SCALE"; $("connectscale").hidden = !boss;
+  $("connectscale").textContent = "Change scale";
+}
+async function autoScale() {
+  if (!("hid" in navigator)) { noScale("This browser can't read scales. Use Chrome."); return; }
+  const saved = store.get("wms.scale");
+  const devs = await navigator.hid.getDevices();
+  const dev = devs.find((d) => saved && d.vendorId === saved.vendorId && d.productId === saved.productId) ?? (saved ? null : devs[0]);
+  if (dev) await useScale(dev); else noScale();
+}
+function noScale(why) {
+  $("scaledot").className = "dot warn"; $("scalename").textContent = why ?? "Scale not connected";
+  $("manualbox").hidden = false; $("wsrc").textContent = "TYPED"; showWeight();
+}
+$("connectscale").onclick = async () => {
+  if (!("hid" in navigator)) return say("Scales need Chrome on the desk PC.", "bad");
+  let [dev] = await navigator.hid.requestDevice({ filters: [{ usagePage: 0x8d }] });
+  if (!dev) [dev] = await navigator.hid.requestDevice({ filters: [] });
+  if (dev) await useScale(dev);
+};
+navigator.hid?.addEventListener("disconnect", (e) => { if (e.device === scaleDev) { scaleDev = null; grams = null; noScale("Scale unplugged"); } });
+function showWeight() {
+  const typed = Number($("manual").value) || null;
+  const w = scaleDev ? grams : typed;
+  $("weight").innerHTML = `${w == null ? "--" : w.toLocaleString("en-AU")} <small>g${scaleDev && !stable ? " · settling" : ""}</small>`;
+  refreshShip();
+}
+$("manual").addEventListener("input", showWeight);
+autoScale();
+
+// ---------- printing (PDF to this PC's default printer) ----------
+function printPdf(b64) {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const f = document.createElement("iframe");
+  f.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0";
+  f.src = url; document.body.appendChild(f);
+  f.onload = () => { setTimeout(() => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch { window.open(url); } }, 300);
+                     setTimeout(() => { f.remove(); URL.revokeObjectURL(url); }, 60000); };
+}
+$("testprint").onclick = () => {
+  const w = window.open("", "_blank", "width=420,height=640");
+  w.document.write(`<html><head><style>@page{size:4in 6in;margin:0}body{margin:0;font:700 28px Arial;display:grid;place-items:center;height:6in;width:4in;border:4px solid #000;box-sizing:border-box;text-align:center}</style></head>
+    <body><div>TWL WMS<br>TEST PRINT<br><small style="font-size:18px">${esc(desk?.name ?? "")}<br>${new Date().toLocaleString("en-AU")}</small></div></body></html>`);
+  w.document.close(); w.focus(); w.print(); setTimeout(() => w.close(), 1500);
+};
+
+// ---------- packing ----------
+$("reprint").disabled = !lastShipment;
+const scan = $("scan");
+setInterval(() => { if (document.activeElement !== scan && document.activeElement !== $("manual") && $("modal").hidden && $("mp").hidden) scan.focus(); }, 1500);
+
+function render(v) {
+  view = v;
+  $("order").hidden = !v;
+  $("cancelorder").disabled = !v;
+  if (!v) { refreshShip(); return; }
+  $("onum").textContent = `#${v.order.order_number}`;
+  $("ocount").textContent = `${v.units_packed ?? 0} / ${v.units_total ?? 0}`;
+  $("ometa").textContent = [v.order.customer, [v.order.city, v.order.state, v.order.country].filter(Boolean).join(" "), v.order.requested_service].filter(Boolean).join(" · ");
+  const fl = v.pick_flags ?? [], missing = fl.filter((f) => f.kind === "missing"), unscanned = fl.filter((f) => f.kind !== "missing");
+  const flagLine = (f) => `<li>${f.qty} × ${esc(f.sku)} · ${esc(FLAG[f.reason] ?? f.reason)}${f.bin ? ` (at ${esc(f.bin)})` : ""}${f.picker ? ` · ${esc(f.picker)}` : ""}${f.note ? ` · "${esc(f.note)}"` : ""}</li>`;
+  $("flags").innerHTML = (missing.length ? `<div class="flags">
+      <h3>⚠ MISSING ITEM: the picker could not pick ${missing.reduce((a, f) => a + f.qty, 0)} item(s)</h3>
+      <ul>${missing.map(flagLine).join("")}</ul>
+      <div class="note">It should NOT be in the tote. Check the cart and tote. If it really is missing, put the order on hold.</div>
+      ${v.order.is_held ? `<div class="row"><span class="chip amber">ON HOLD: ${esc(v.order.hold_reason ?? "")}</span></div>`
+        : `<div class="row"><button class="ghost" id="holdbtn" style="color:var(--red);border-color:var(--red)">Put order on hold (missing item)</button></div>`}
+    </div>` : "")
+    + (unscanned.length ? `<div class="flags amberflag">
+      <h3>⚠ CHECK: ${unscanned.reduce((a, f) => a + f.qty, 0)} item(s) were picked WITHOUT a scan</h3>
+      <ul>${unscanned.map(flagLine).join("")}</ul>
+      <div class="note">It should be in the tote. Check it is exactly the right product, size and colour. If its barcode won't scan here either, use "Can't scan? Pass manually".</div>
+    </div>` : "");
+  $("holdbtn")?.addEventListener("click", holdOrder);
+  $("lines").innerHTML = (v.lines ?? []).map((l) => `<div class="line ${l.remaining === 0 ? "done" : ""}" data-sku="${esc(l.sku)}">
+      ${l.image_url ? `<img src="${esc(l.image_url + (l.image_url.includes("?") ? "&" : "?") + "width=128")}" alt="">` : `<div class="noimg"></div>`}
+      <div><div><b>${esc(l.name)}</b> ${l.variant ? `<span class="mono">${esc(l.variant)}</span>` : ""}</div><div class="sku">${esc(l.sku)}</div>
+        ${(l.pick_flag ?? []).map((f) => `<span class="lineflag ${f.kind === "missing" ? "" : "amber"}">${f.kind === "missing" ? `MISSING ${f.qty}: NOT IN TOTE` : `${f.qty} PICKED WITHOUT SCAN: CHECK IT`} · ${esc(FLAG[f.reason] ?? f.reason)}</span>`).join(" ")}
+        ${v.status === "packing" && l.remaining > 0 ? `<button class="ghost passbtn" data-pass="${esc(l.order_line_id)}">Can't scan? Pass manually</button>` : ""}</div>
+      <div class="q">${l.qty_packed}/${l.qty_ordered}</div></div>`).join("");
+  refreshShip();
+}
+function refreshShip() {
+  const w = scaleDev ? grams : Number($("manual").value) || null;
+  const ready = view && view.complete && view.status === "packed" && w > 0 && (!scaleDev || stable);
+  $("ship").disabled = !ready;
+}
+
+const FLAG = { not_in_location: "Not in location", damaged_stock: "Damaged stock", not_enough: "Not enough in location",
+  no_barcode: "No barcode", barcode_wont_scan: "Barcode wouldn't scan / label damaged", other: "Other" };
+async function holdOrder() {
+  const missing = (view.pick_flags ?? []).filter((f) => f.kind === "missing").map((f) => `${f.qty} x ${f.sku}`).join(", ");
+  if (!(await ask("Put on hold?", `#${view.order.order_number} goes on hold as a missing item order (${missing}). Put the box and items aside for a supervisor.`, "Put on hold"))) return;
+  const { data, error } = await sb.rpc("wms_pack_hold", { p_shipment_id: view.shipment_id, p_reason: `Missing item at packing: ${missing}` });
+  if (error) return failed(error);
+  if (!data.ok) { bad(); return say(data.error, "bad"); }
+  beep(600, 150);
+  say(`#${view.order.order_number} is ON HOLD. Put it aside for a supervisor, then scan the next order.`, "warn");
+  render(null);
+}
+const ERR = {
+  ORDER_NOT_FOUND: "Order or tote not found. Check the number and scan again.",
+  ORDER_NOT_READY: "This order isn't ready to pack yet.",
+  ORDER_CANCELLED: "ORDER CANCELLED. Do not ship. Put the items back.",
+  UNKNOWN_BARCODE: "Barcode not recognised. Scan the item barcode again.",
+  NOT_IN_ORDER: "WRONG ITEM. This item is not on this order.",
+  ALREADY_PACKED: "Already scanned enough of this item.",
+  SHIPMENT_CLOSED: "This box is already closed.",
+};
+
+$("choose").addEventListener("click", (e) => { const b = e.target.closest("[data-order]"); if (b) startOrder(b.dataset.order); });
+async function startOrder(code, override = false) {
+  if (!desk) { await chooseDesk(); if (!desk) return; }
+  $("choose").hidden = true;
+  const { data, error } = await sb.rpc("wms_pack_start", { p_scan: code, p_pack_station_id: desk.id, p_override_hold: override });
+  if (error) return failed(error);
+  if (!data.ok) {
+    if (data.error === "ORDER_ON_HOLD") {
+      bad();
+      if (!boss) return say(`ON HOLD: #${data.order_number}. ${data.reason ?? ""} Ask a supervisor.`, "bad");
+      if (await ask("Order on hold", `#${data.order_number}: ${data.reason ?? "On hold"}. Pack it anyway?`, "Pack anyway")) return startOrder(code, true);
+      return say("Left on hold.", "warn");
+    }
+    if (data.error === "TOTE_HAS_ORDERS") {
+      good();
+      say(`Tote ${data.tote} has ${data.orders.length} orders. Pick the one you are packing (or scan its order number).`, "warn");
+      $("choose").innerHTML = data.orders.map((o) => `<button class="ghost" data-order="${esc(o.order_number)}">#${esc(o.order_number)} · ${esc(o.customer ?? "")} · ${o.units} pcs${o.status === "packing" ? " · started" : ""}</button>`).join("");
+      $("choose").hidden = false;
+      return;
+    }
+    if (data.error === "ALREADY_PACKED") {
+      bad(); say(`#${data.order_number} is already packed (${data.status}). Use Reprint if the label is missing.`, "warn");
+      if (data.shipment_id) { lastShipment = data.shipment_id; $("reprint").disabled = false; }
+      return;
+    }
+    bad(); return say(ERR[data.error] ?? data.error, "bad");
+  }
+  good(); render(data);
+  const warn = (data.warnings ?? []).find((w) => w.type === "ORDER_ON_HOLD");
+  const flagged = (data.pick_flags ?? []).length;
+  if (flagged) bad();
+  const anyMissing = (data.pick_flags ?? []).some((f) => f.kind === "missing");
+  say(warn ? `ON HOLD (packing anyway): ${warn.reason ?? ""}` : flagged ? (anyMissing ? "MISSING ITEM on this order. Read the warning below." : "Some items were picked without a scan. Check them below.") : data.complete ? "All items scanned. Put the box on the scale." : "Scan each item.", warn || flagged ? "warn" : "");
+}
+
+async function scanItem(code) {
+  const { data, error } = await sb.rpc("wms_pack_scan", { p_shipment_id: view.shipment_id, p_barcode: code });
+  if (error) return failed(error);
+  if (data.shipment_id) render(data);
+  if (!data.ok) { bad(); return say(ERR[data.error] ? `${ERR[data.error]}${data.scanned_sku ? ` (${data.scanned_sku})` : ""}` : data.error, "bad"); }
+  const row = document.querySelector(`.line[data-sku="${CSS.escape(data.sku)}"]`); row?.classList.add("flash"); setTimeout(() => row?.classList.remove("flash"), 400);
+  const w = (data.warnings ?? [])[0];
+  if (data.auto_closed) { done(); say("All items scanned. Put the box on the scale, then press SHIP.", "good"); }
+  else { good(); say(w ? w.message : `${data.sku} ✓`, w ? "warn" : "good"); }
+}
+
+async function failed(error) {
+  if (/NOT_STAFF|JWT|not signed/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/pack.html"; return; }
+  bad(); say(error.message, "bad");
+}
+
+scan.addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter") return;
+  const code = scan.value.trim(); scan.value = ""; if (!code) return;
+  if (view && view.status === "packing") return scanItem(code);
+  if (view && view.status === "packed" && code.toUpperCase() === "SHIP") return ship();
+  return startOrder(code);
+});
+
+async function callShip(body) {
+  const { data, error } = await sb.functions.invoke("pack-and-ship", { body });
+  if (error) { let j = null; try { j = await error.context.json(); } catch {} return j ?? { ok: false, error: error.message }; }
+  return data;
+}
+
+async function ship(force = false) {
+  if ($("ship").disabled && !force) return;
+  const w = scaleDev ? grams : Number($("manual").value);
+  $("ship").disabled = true; $("ship").textContent = "MAKING LABEL…";
+  const set = await sb.rpc("wms_pack_set_weight", { p_shipment_id: view.shipment_id, p_weight_grams: w, p_source: scaleDev ? "scale" : "manual" });
+  if (set.error || !set.data?.ok) { $("ship").textContent = "SHIP"; refreshShip(); bad(); return say(set.error?.message ?? set.data.error, "bad"); }
+  const r = await callShip({ shipment_id: view.shipment_id, force });
+  $("ship").textContent = "SHIP";
+  if (!r.ok) {
+    if (r.error === "ALREADY_LABELLED") {
+      bad();
+      if (await ask("Already has a label", r.message, "Make another label")) return ship(true);
+      refreshShip(); return say("No label made.", "warn");
+    }
+    if (r.error === "NOT_SIGNED_IN") { await clearLogin(); location.href = "/index.html?next=/pack.html"; return; }
+    bad(); refreshShip(); return say(`Label failed: ${r.error}`, "bad");
+  }
+  $("testbanner").hidden = !r.test_label;
+  lastShipment = view.shipment_id; store.set("wms.lastShipment", lastShipment); $("reprint").disabled = false;
+  if (r.label_pdf) { printPdf(r.label_pdf); await sb.rpc("wms_mark_printed", { p_shipment_id: lastShipment }); }
+  done();
+  say(`#${r.order_number} shipped${r.test_label ? " (TEST)" : ""}. Tracking ${r.tracking_number ?? "-"}.${r.print_error ? " Print problem: use Reprint." : ""} Scan the next order.`, r.print_error ? "warn" : "good");
+  render(null); $("manual").value = "";
+}
+$("ship").onclick = () => ship();
+
+// ---------- manual pass (1 unit, confirmed, reason, recorded against the packer) ----------
+let mpLine = null;
+const mpValid = () => { $("mpyes").disabled = !($("mpok").checked && $("mpreason").value && ($("mpreason").value !== "other" || $("mpnote").value.trim())); };
+for (const id of ["mpok", "mpreason", "mpnote"]) { $(id).addEventListener("input", mpValid); $(id).addEventListener("change", mpValid); }
+$("mpreason").addEventListener("change", () => { $("mpnotebox").hidden = $("mpreason").value !== "other"; });
+$("lines").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-pass]"); if (!b || !view) return;
+  const l = view.lines.find((x) => x.order_line_id === b.dataset.pass); if (!l) return;
+  mpLine = l;
+  $("mpprod").innerHTML = `${l.image_url ? `<img src="${esc(l.image_url + (l.image_url.includes("?") ? "&" : "?") + "width=192")}" alt="">` : `<div class="noimg"></div>`}
+    <div><div style="font-size:18px"><b>${esc(l.name)}</b></div>${l.variant ? `<div class="mono" style="font-size:14px">${esc(l.variant)}</div>` : ""}
+    <div class="sku" style="font-size:16px;margin-top:4px">${esc(l.sku)}</div><div class="mono" style="margin-top:4px">${l.remaining} STILL NEEDED ON THIS ORDER</div></div>`;
+  $("mpreason").value = ""; $("mpnote").value = ""; $("mpok").checked = false; $("mpnotebox").hidden = true; mpValid();
+  $("mp").hidden = false; $("mpreason").focus();
+});
+$("mpno").onclick = () => { $("mp").hidden = true; mpLine = null; };
+$("mpyes").onclick = async () => {
+  if (!mpLine || $("mpyes").disabled) return;
+  $("mpyes").disabled = true;
+  const { data, error } = await sb.rpc("wms_pack_manual_pass", { p_shipment_id: view.shipment_id, p_order_line_id: mpLine.order_line_id,
+    p_reason: $("mpreason").value, p_confirmed: $("mpok").checked, p_note: $("mpnote").value.trim() || null });
+  $("mp").hidden = true; mpLine = null;
+  if (error) return failed(error);
+  if (data.shipment_id) render(data);
+  if (!data.ok) { bad(); return say(ERR[data.error] ?? data.error, "bad"); }
+  const w = (data.warnings ?? [])[0];
+  if (data.auto_closed) { done(); say("All items done (1 passed by hand). Put the box on the scale, then press SHIP.", "good"); }
+  else { good(); say(w ? w.message : `${data.sku} passed by hand ✓ (recorded)`, w ? "warn" : "good"); }
+};
+
+$("reprint").onclick = async () => {
+  if (!lastShipment) return;
+  const r = await callShip({ shipment_id: lastShipment, action: "reprint" });
+  if (!r.ok) { bad(); return say(r.error === "NO_LABEL_YET" ? "No label has been made for that order yet." : `Reprint failed: ${r.error}`, "bad"); }
+  printPdf(r.label_pdf); good(); say(`Reprinted label for #${r.order_number ?? ""}.`, "good");
+};
+$("cancelorder").onclick = async () => {
+  if (view && view.status === "packing" && !(await ask("Leave this order?", "Items scanned so far stay recorded. Scan it again later to carry on.", "Leave it"))) return;
+  render(null); say("Scan a tote, or the order number on the packing slip.");
+};
+</script>
+</body>
+</html>

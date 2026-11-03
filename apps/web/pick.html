@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="mobile-web-app-capable" content="yes"><meta name="theme-color" content="#111111">
+<title>Picking · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<link rel="stylesheet" href="/css/tablet.css?v=6">
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc" id="hdr">PICKING</span><span class="mono" style="color:#ccc" id="who"></span></div>
+<input id="scan" inputmode="none" autocomplete="off" autocapitalize="characters" spellcheck="false">
+<main id="app"></main>
+<div class="modal" id="modal" hidden><div class="panel" id="mpanel"></div></div>
+
+<script type="module">
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=5";
+const me = await requireLogin();
+if (me?.role === "display") location.href = "/tv.html";
+const boss = ["admin", "supervisor"].includes(me?.role);
+const $ = (id) => document.getElementById(id);
+$("who").textContent = (me?.name ?? "").toUpperCase();
+const app = $("app"), scan = $("scan");
+
+// ---------- sounds ----------
+let ac; const tone = (f, ms, n = 1, gap = 60) => { try { ac ??= new AudioContext(); for (let i = 0; i < n; i++) { const o = ac.createOscillator(), g = ac.createGain();
+  o.frequency.value = f; o.connect(g); g.connect(ac.destination); const t = ac.currentTime + i * (ms + gap) / 1000; g.gain.setValueAtTime(.25, t); o.start(t); o.stop(t + ms / 1000); } } catch {} };
+const good = () => tone(1300, 70), bad = () => { tone(200, 250, 3); navigator.vibrate?.([200, 80, 200]); }, done = () => { tone(900, 90); setTimeout(() => tone(1400, 160), 120); };
+
+// ---------- scanner: Bluetooth scanner types into a hidden box + Enter ----------
+let onScan = null;
+const keepFocus = () => { if ($("modal").hidden && !document.activeElement?.matches?.("input:not(#scan)")) scan.focus(); };
+setInterval(keepFocus, 800); document.addEventListener("click", () => setTimeout(keepFocus, 50));
+scan.addEventListener("keydown", (e) => { if (e.key !== "Enter") return; const v = scan.value.trim().toUpperCase(); scan.value = ""; if (v && onScan) onScan(v); });
+async function rpc(fn, args) {
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) { if (/NOT_STAFF|JWT/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/pick.html"; } throw error; }
+  return data;
+}
+const msg = (text, kind = "") => { const m = document.getElementById("msg"); if (m) { m.className = "msg " + kind; m.textContent = text; if (kind === "bad") { m.classList.remove("flash-bad"); void m.offsetWidth; m.classList.add("flash-bad"); } } };
+const reasonLabel = { break: "Break", bathroom: "Bathroom", end_of_shift: "End of shift", other: "Other", unassigned: "Unassigned by supervisor" };
+
+// ===================== HOME: pick a cart =====================
+let state = null, binOk = false;
+let lastPicks = [], lastSession = null;   // what went into which tote on this cart (newest first)
+let carts = [], chosen = null;   // cart list + the cart being confirmed
+const GRP = { REGS: ["Regular", "#2f5bd3"], PRIO_AU: ["Priority AU", "#c2185b"], PRIO_INT: ["International", "#6a1b9a"], ICON: ["The Iconic", "#111111"], OPENFR8: ["OpenFreight", "#00796b"], PKUP: ["Pickup", "#e65100"], OTHER: ["Other", "#757575"] };
+const grpBadge = (g) => (g ?? "").split("+").filter(Boolean).map((k) => `<span class="chip" style="background:${(GRP[k] ?? [k, "#757575"])[1]};color:#fff">${esc((GRP[k] ?? [k])[0])}</span>`).join(" ");
+const STATE = { not_started: ["Ready", "var(--green)"], paused: ["Paused", "var(--amber)"], released: ["Needs a picker", "var(--orange)"], picking: ["Being picked", "var(--blue)"] };
+// a cart is free to choose unless someone else is picking it or has it paused
+const takenByOther = (c) => !c.mine && c.picker && (c.state === "picking" || c.state === "paused");
+const confirmCode = (c) => c.first_tote ?? c.cart_barcode;   // carts without fixed totes: scan the cart label
+const sameCode = (v, code) => { const a = v.trim().toUpperCase(), b = (code ?? "").toUpperCase();
+  if (a === b) return true;
+  const na = a.match(/^\D*(\d+)$/), nb = b.match(/^(\D*)(\d+)$/);   // typed "26" or "026" for BIN026
+  return !!(na && nb && (a.replace(/\d+$/, "") === "" || a.replace(/\d+$/, "") === nb[1]) && Number(na[1]) === Number(nb[2])); };
+
+// STEP 1: choose a cart from the list
+async function home(note, kind) {
+  state = null; chosen = null; binOk = false; $("hdr").textContent = "PICKING";
+  app.innerHTML = `<div class="step">Start picking</div><div class="huge" style="font-size:44px">Choose a cart</div>
+    <div id="msg" class="msg ${kind ?? ""}">${esc(note ?? "Tap the cart you're taking. You'll scan its first tote to confirm.")}</div>
+    <div class="stat" id="rate"></div>
+    <div class="list" id="carts"><div class="mono">Loading…</div></div>
+    <div class="btns" style="margin-top:10px"><a class="ghost tbtn" href="/stock.html">Stock tools (move / merge / look up)</a><button class="ghost" id="out">Sign out</button></div>`;
+  // scanning a cart's first tote here skips straight to that cart
+  onScan = (v) => { const c = carts.find((x) => sameCode(v, confirmCode(x)) && v.trim().length > 2);
+    if (c && !takenByOther(c)) { good(); return openCart(c.cart_barcode); }
+    bad(); msg(c ? `${c.cart} is being picked by ${c.picker}.` : "Tap a cart in the list first, then scan its first tote.", "bad"); };
+  $("out").onclick = signOut;
+  try {
+    carts = await rpc("wms_pick_carts_available");
+    const free = carts.filter((c) => !takenByOther(c)), busy = carts.filter(takenByOther);
+    const row = (c, off) => { const [l, col] = STATE[c.state] ?? [c.state, "var(--muted)"];
+      return `<div class="cart ${off ? "off" : ""}" data-pickcart="${esc(c.session_id)}"><b class="code">${esc(c.cart)}</b>
+        <div>${grpBadge(c.group)} <b>${c.orders}</b> orders · <b>${c.units - c.picked}</b> units to pick${c.express ? ` <span class="chip" style="background:var(--orange);color:#111">EXPRESS</span>` : ""}
+          <div class="split mono">${c.mine ? "YOUR CART · " : c.picker ? esc(c.picker).toUpperCase() + " · " : ""}${c.pause_reason ? esc(reasonLabel[c.pause_reason] ?? c.pause_reason).toUpperCase() + " · " : ""}FIRST TOTE ${esc(c.first_tote ?? "-")} · START ${esc(c.first_bin ?? "-")}</div></div>
+        <span class="chip" style="background:${col}">${l}</span></div>`; };
+    $("carts").innerHTML = (free.length ? `<div class="step">Carts ready to pick</div>` + free.map((c) => row(c, false)).join("")
+        : `<div class="card">No carts waiting. Ask a supervisor to build carts in Orders and carts.</div>`)
+      + (busy.length ? `<div class="step" style="margin-top:8px">Being picked by someone else</div>` + busy.map((c) => row(c, true)).join("") : "");
+    const rates = await rpc("wms_pick_rates");
+    const mine = rates.find((r) => r.staff_id === me.id);
+    if (mine) $("rate").innerHTML = `<div><span class="mono">Units today</span><b>${fmt(mine.units)}</b></div><div><span class="mono">Units / hour</span><b>${mine.units_per_hour ?? "-"}</b></div><div><span class="mono">Carts done</span><b>${mine.carts}</b></div>`;
+  } catch (e) { msg(e.message, "bad"); }
+}
+app.addEventListener("click", (e) => { const c = e.target.closest("[data-pickcart]"); if (!c || state || chosen) return;
+  const cart = carts.find((x) => x.session_id === c.dataset.pickcart); if (!cart) return;
+  if (takenByOther(cart)) {
+    if (["admin", "supervisor"].includes(me?.role)) return confirmCart(cart);   // supervisors can still take it over
+    bad(); return msg(`${cart.cart} is being picked by ${cart.picker}. Choose another cart.`, "bad");
+  }
+  confirmCart(cart); });
+
+// STEP 2: scan the first tote on the cart to prove it's the right one
+function confirmCart(c) {
+  chosen = c; $("hdr").textContent = `${c.cart} · CONFIRM`;
+  const code = confirmCode(c);
+  app.innerHTML = `<div class="step">Step 2 of 2 · confirm the cart</div>
+    <div class="loc"><div class="step">You chose</div><div class="big">${esc(c.cart)}</div></div>
+    <div class="card"><div class="step">${c.first_tote ? "Scan the first tote on this cart" : "Scan the cart label"}</div>
+      <div class="huge" style="font-size:72px;color:var(--orange)">${esc(code)}</div></div>
+    ${typeBox(c.first_tote ? `or type the tote number, eg ${code.replace(/^\D+0*/, "")}` : "or type the cart label")}
+    <div id="msg" class="msg">${c.first_tote ? `Find tote ${esc(code)} at the front of ${esc(c.cart)} and scan it.` : `Scan the label on ${esc(c.cart)}.`}</div>
+    <div class="btns"><button class="ghost" id="back">Choose a different cart</button><span></span></div>`;
+  const check = (v) => {
+    if (sameCode(v, code)) { good(); return openCart(c.cart_barcode, takenByOther(c)); }
+    bad();
+    const other = carts.find((x) => x !== c && sameCode(v, confirmCode(x)));
+    msg(other ? `That's ${v.toUpperCase()}, the first tote on ${other.cart}. You chose ${c.cart}: scan ${code}.` : `That's not ${code}. Scan the first tote on ${c.cart}.`, "bad");
+  };
+  onScan = check;
+  wireType(check);
+  $("back").onclick = () => home();
+}
+function typeBox(ph) { return `<div class="typebox"><input id="typed" placeholder="${esc(ph)}" autocapitalize="characters"><button id="gotype">OK</button></div>`; }
+function wireType(cb) { const go = () => { const v = $("typed").value.trim(); if (v) { $("typed").value = ""; cb(v); } };
+  $("gotype").onclick = go; $("typed").addEventListener("keydown", (e) => { if (e.key === "Enter") go(); }); }
+
+async function openCart(code, takeOver = false) {
+  try {
+    const r = await rpc("wms_pick_open_cart", { p_cart: code, p_take_over: takeOver });
+    if (!r.ok) {
+      bad();
+      if (r.error === "CART_IN_USE") {
+        if (r.can_take_over && await confirmBox("Cart in use", `${r.cart} is being picked by ${r.picker}. Take it over?`, "Take over")) return openCart(code, true);
+        return msg(`${r.cart} is being picked by ${r.picker}.`, "bad");
+      }
+      return msg({ CART_NOT_FOUND: `Cart "${code}" not found.`, NOTHING_ON_CART: `${r.cart} has nothing to pick. Ask a supervisor to build it.` }[r.error] ?? r.error, "bad");
+    }
+    good(); state = r; binOk = false; route();
+  } catch (e) { bad(); msg(e.message, "bad"); }
+}
+
+// decide which screen
+function route() {
+  $("hdr").textContent = `${state.cart} · PICKING`;
+  if (state.need_totes?.length) return toteScreen();
+  if (state.current?.done || state.all_picked) return finishScreen();
+  return pickScreen();
+}
+async function refresh() { state = await rpc("wms_pick_state", { p_session_id: state.session_id }); route(); }
+
+// ===================== TOTES: one per order =====================
+function toteScreen() {
+  const next = state.need_totes[0], total = state.tote_slots ?? state.orders, n = total - state.need_totes.length + 1;
+  const shared = next.includes(",");
+  app.innerHTML = `<div class="step">Set up ${esc(state.cart)} · tote ${n} of ${total}</div>
+    <div class="card"><div class="step">Scan an empty tote for ${shared ? "these orders (they share one tote)" : "order"}</div><div class="big" style="${shared ? "font-size:34px" : ""}">${esc(next)}</div></div>
+    <div class="typebox"><input id="typetote" placeholder="or type the tote number, eg 412 or 001" inputmode="numeric" autocomplete="off"><button id="gotote">Add tote</button></div>
+    <div id="msg" class="msg">Scan the tote barcode (or type its number), then put the tote on the cart.</div>
+    ${state.totes.length ? `<div class="totes">${state.totes.map((t) => `<span class="tote">${esc(t.tote)}<small>${esc(t.orders)}</small></span>`).join("")}</div>` : ""}
+    <div class="btns"><button class="ghost" id="pause">Pause</button><span></span></div>`;
+  $("pause").onclick = pauseBox;
+  const addTote = async (v) => {
+    try {
+      const r = await rpc("wms_assign_totes", { p_session_id: state.session_id, p_tote_barcodes: [v] });
+      if (!r.ok) { bad(); return msg({ UNKNOWN_TOTE: `"${v}" is not a tote. Check the number on the tote.`, TOTE_IN_USE: `Tote ${r.tote ?? v} is already in use. Use another tote.` }[r.error] ?? r.error, "bad"); }
+      good(); await refresh();
+      const t = r.assigned?.[0]; if (t) msg(`✓ ${t.tote} for #${t.orders.replace(/, /g, ", #")}.`, "good");
+    } catch (e) { bad(); msg(e.message, "bad"); }
+  };
+  onScan = addTote;
+  const typed = () => { const v = $("typetote").value.trim(); if (v) { $("typetote").value = ""; addTote(v); } };
+  $("gotote").onclick = typed;
+  $("typetote").addEventListener("keydown", (e) => { if (e.key === "Enter") typed(); });
+}
+
+// ===================== PICK: location -> product =====================
+function pickScreen() {
+  const t = state.current.task, p = state.current.progress;
+  const left = t.qty_required - t.qty_picked;
+  const pct = state.units ? Math.round(100 * state.picked / state.units) : 0;
+  const holds = (t.put_into ?? []).filter((x) => x.on_hold);
+  app.innerHTML = `
+    <div class="prog"><span>STOP ${p.done + 1} OF ${p.total}</span><span>${state.picked}/${state.units} UNITS</span></div>
+    <div class="bar2"><i style="width:${pct}%"></i></div>
+    ${lastSession === state.session_id && lastPicks.length ? `<div class="lastpick" id="lastpick"><span class="step">Last pick</span>
+      <span>${lastPicks.filter((x) => x.scan === lastPicks[0].scan).reverse().map((x) => `<b>${x.qty} × ${esc(x.sku)}</b> for #${esc(x.order)} → <span class="ltote">${esc(x.tote ?? "#" + x.order)}</span>`).join("<br>")}</span>
+      <span></span><button class="ghost" id="lphist">Recent</button></div>` : ""}
+    <div class="loc ${binOk ? "ok" : ""}"><div class="step">${binOk ? "✓ Location confirmed" : "Go to location, scan the location label"}</div><div class="big">${esc(t.bin)}</div></div>
+    <div class="card prod">${t.image_url ? `<img src="${esc(t.image_url + (t.image_url.includes("?") ? "&" : "?") + "width=280")}" alt="">` : `<div class="noimg"></div>`}
+      <div><div class="pname">${esc(t.name)}</div>${t.variant ? `<div class="pvar">${esc(t.variant)}</div>` : ""}<div class="psku">${esc(t.sku)}</div></div></div>
+    <div class="card inloc"><div><div class="step">Should be in this location</div><div class="inq"><b>${t.bin_on_hand ?? "-"}</b> <span class="mono">BEFORE YOU PICK</span></div></div>
+      <button class="ghost" id="fixcount" ${binOk ? "" : "disabled"}>${binOk ? "Count wrong? Fix it" : "Scan the location to fix the count"}</button></div>
+    ${t.bin_on_hand != null && t.bin_on_hand < left ? `<div class="msg warn">The WMS only shows ${t.bin_on_hand} here but you need ${left}. Count what's there.</div>` : ""}
+    <div class="qtyrow"><div><div class="step">Pick</div><div class="huge">${left}</div></div>
+      <div><div class="step">Put into</div><div class="totes">${(t.put_into ?? []).filter((x) => x.qty > x.qty_picked).map((x) =>
+        `<span class="tote">${esc(x.basket_barcode ?? "#" + x.order_number)} ×${x.qty - x.qty_picked}<small>#${esc(x.order_number)}</small></span>`).join("")}</div></div></div>
+    ${holds.length ? `<div class="msg warn">ON HOLD: #${holds.map((h) => esc(h.order_number)).join(", #")}. Pick it, but tell your supervisor.</div>` : ""}
+    <div id="msg" class="msg">${binOk ? "Now scan the product." : `Scan the location label at ${esc(t.bin)}.`}</div>
+    <div class="btns"><button class="ghost" id="cant" style="color:var(--red);border-color:var(--red)">Can't pick this</button><button class="ghost" id="pause">Pause</button></div>`;
+  $("pause").onclick = pauseBox;
+  $("cant").onclick = () => cantPickBox(t);
+  $("lphist")?.addEventListener("click", recentBox);
+  if (binOk) $("fixcount").onclick = () => countBox(t);
+  onScan = async (v) => {
+    try {
+      if (!binOk) {
+        const r = await rpc("wms_confirm_bin", { p_task_id: t.id, p_bin_barcode: v });
+        if (!r.ok) { bad(); return msg(`WRONG LOCATION. You scanned ${v}. Go to ${r.expected_bin}.`, "bad"); }
+        good(); binOk = true; return pickScreen();
+      }
+      if (left > 1) return qtyBox(t, v, left);
+      await doPick(t, v, 1);
+    } catch (e) { bad(); msg(e.message, "bad"); }
+  };
+}
+async function doPick(t, barcode, qty) {
+  const r = await rpc("wms_pick_scan", { p_task_id: t.id, p_barcode: barcode, p_qty: qty });
+  if (!r.ok && (r.error === "CART_PAUSED" || r.error === "NOT_YOUR_CART")) {
+    bad(); return home(r.error === "NOT_YOUR_CART" ? `${state.cart} has been given to ${r.picker ?? "another picker"}. Pick another cart.`
+                                                   : `${state.cart} was taken off you by a supervisor. Scan it again to carry on, or pick another cart.`, "bad");
+  }
+  if (!r.ok && (r.error === "TASK_NOT_FOUND" || r.error === "NOT_CURRENT_TASK")) {
+    bad(); binOk = false; await refresh();
+    return msg("That stop changed (a supervisor may have taken an order off this cart). Carry on from here.", "warn");
+  }
+  if (!r.ok) {
+    bad();
+    return msg({ WRONG_ITEM: `WRONG ITEM. You scanned ${r.scanned_sku}. Need ${r.expected_sku}.`, UNKNOWN_BARCODE: "Barcode not recognised. Scan the product barcode.",
+      OVER_QTY: `Too many. Only ${r.remaining} needed.`, NOT_CURRENT_TASK: "That's not this stop. Refreshing…", SESSION_NOT_STARTED: "Cart is paused. Scan the cart to resume." }[r.error] ?? r.error, "bad");
+  }
+  // which tote each unit went into (from the stop's tote list)
+  if (lastSession !== state.session_id) { lastPicks = []; lastSession = state.session_id; }
+  const placed = (r.put_into ?? []).map((x) => ({ qty: x.qty, order: x.order_number, sku: t.sku, name: t.name, variant: t.variant,
+    tote: (t.put_into ?? []).find((y) => y.order_number === x.order_number)?.basket_barcode ?? null, at: new Date(), scan: Date.now() }));
+  const scanId = placed[0]?.scan; placed.forEach((x) => { x.scan = scanId; });
+  lastPicks = placed.reverse().concat(lastPicks).slice(0, 30); placed.reverse();
+  const into = placed.map((x) => `${x.qty} item${x.qty === 1 ? "" : "s"} picked for order #${x.order}${x.tote ? ` into ${x.tote}` : ""}`).join("; ");
+  if (r.task_done) { binOk = false; }
+  good(); await refresh();
+  msg(`✓ ${into || r.qty + " picked"}.`, "good");
+}
+
+// what went into which tote on this cart (newest first)
+function recentBox() {
+  $("mpanel").innerHTML = `<h2>Recent picks on ${esc(state.cart)}</h2>
+    <div class="list">${lastPicks.map((x) => `<div class="cart" style="grid-template-columns:auto 1fr auto"><b class="code" style="color:var(--orange)">${esc(x.tote ?? "-")}</b>
+      <div><b>${x.qty} × ${esc(x.sku)}</b>${x.variant ? ` <span class="mono">${esc(x.variant)}</span>` : ""}<div class="split mono">ORDER #${esc(x.order)}</div></div>
+      <span class="mono">${x.at.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}</span></div>`).join("")}</div>
+    <div class="btns"><button class="ghost" id="rclose">Close</button><span></span></div>`;
+  $("rclose").onclick = () => { $("modal").hidden = true; };
+  $("modal").hidden = false;
+}
+
+// quantity pad (scan once, enter how many)
+function qtyBox(t, barcode, left) {
+  let q = String(left);
+  const draw = () => { $("mpanel").innerHTML = `<h2>How many ${esc(t.sku)}?</h2><div class="qtyshow" id="qv">${q || "0"}</div>
+    <div class="mono" style="text-align:center">${left} NEEDED</div>
+    <div class="pad">${[1,2,3,4,5,6,7,8,9].map((n) => `<button data-n="${n}">${n}</button>`).join("")}<button data-n="C">Clear</button><button data-n="0">0</button><button data-n="B">⌫</button></div>
+    <div class="btns"><button class="ghost" id="qno">Cancel</button><button class="signal" id="qyes">Pick ${q || 0}</button></div>`;
+    $("mpanel").onclick = (e) => { const b = e.target.closest("[data-n]"); if (!b) return; const n = b.dataset.n;
+      q = n === "C" ? "" : n === "B" ? q.slice(0, -1) : (q === String(left) && q.length ? n : (q + n).replace(/^0+/, "")); draw(); };
+    $("qno").onclick = () => { $("modal").hidden = true; };
+    $("qyes").onclick = async () => { const n = Number(q); if (!n) return; $("modal").hidden = true; try { await doPick(t, barcode, n); } catch (e) { bad(); msg(e.message, "bad"); } }; };
+  draw(); $("modal").hidden = false;
+}
+
+// can't pick: two paths
+//   MISSING / DAMAGED  -> nothing goes in the tote, packer alerted (missing item)
+//   HERE, WON'T SCAN   -> item goes in the tote unscanned, packer told to check it
+function cantPickBox(t) {
+  const left = t.qty_required - t.qty_picked;
+  let path = "", reason = "", qty = left;
+  const MISSING = [["not_in_location", "Not in the location"], ["not_enough", "Not enough in the location"], ["damaged_stock", "Damaged (can't be sent)"], ["other", "Other (write a note)"]];
+  const NOSCAN  = [["no_barcode", "No barcode on the item"], ["barcode_wont_scan", "Barcode won't scan / label damaged"], ["wrong_barcode", "Barcode scans as a different product"]];
+  const draw = () => {
+    const missing = path === "missing";
+    $("mpanel").innerHTML = `<h2>Can't pick ${esc(t.sku)}?</h2>
+    <div class="redwarn">Only use this if you genuinely cannot scan or find the item. Every override is recorded against your name and checked at packing. Incorrect overrides may result in disciplinary action.</div>
+    ${!path ? `<div class="step">What's the problem?</div>
+      <div class="opts">
+        <button data-p="missing" style="border-color:var(--red)"><b style="color:var(--red)">The item is missing or damaged</b><br><span class="mono">Nothing goes in the tote · the packer is alerted</span></button>
+        <button data-p="noscan" style="border-color:var(--amber)"><b style="color:#6b4a10">The item is here, but won't scan</b><br><span class="mono">It goes in the tote · the packer checks it</span></button>
+      </div>`
+    : `<div class="msg ${missing ? "bad" : "warn"}" style="font-size:17px">${missing ? "MISSING OR DAMAGED" : "HERE, BUT WON'T SCAN"} <button class="ghost" id="chg" style="min-height:34px;font-size:13px;margin-left:8px">Change</button></div>
+      <div class="step">Why?</div>
+      <div class="opts">${(missing ? MISSING : NOSCAN).map(([k, l]) => `<button data-r="${k}" class="${k === reason ? "on" : ""}">${l}</button>`).join("")}</div>
+      ${reason === "other" || reason === "wrong_barcode" ? `<input id="note" placeholder="${reason === "other" ? "What happened?" : "What did it scan as? (optional)"}" style="font-size:18px">` : ""}
+      ${!missing && left > 1 ? `<div class="qtyrow" style="align-items:center"><div class="step">How many are in your hand?</div>
+          <div style="display:flex;gap:8px;align-items:center"><button class="ghost" id="qm" style="min-height:52px;width:60px;font-size:24px">−</button>
+          <div class="qtyshow" style="font-size:40px;min-width:60px" id="qv">${qty}</div><button class="ghost" id="qp" style="min-height:52px;width:60px;font-size:24px">+</button></div></div>` : ""}
+      ${reason ? (missing
+        ? `<div class="msg bad">${left > 1 ? "If you found some, cancel and scan those first. " : ""}${left} × ${esc(t.sku)} will be marked MISSING. The packer will be alerted and can put the order on hold.</div>`
+        : `<div class="msg warn">${qty} × ${esc(t.sku)} go in the tote without a scan. The packer will be told to check ${qty > 1 ? "them" : "it"}.${qty < left ? ` The other ${left - qty} stay on this stop.` : ""}</div>`) : ""}
+      ${reason ? `<label class="check"><input type="checkbox" id="ok"><span>${missing ? "I have checked the location. The item is not there, or it is not good enough to send." : "I have checked the item in my hand. It is exactly this product, size and colour."}</span></label>` : ""}`}
+    <div class="btns"><button class="ghost" id="xno">Cancel</button><button id="xyes" style="background:${missing ? "var(--red)" : "var(--amber)"};border-color:${missing ? "var(--red)" : "var(--amber)"};color:${missing ? "#fff" : "#111"}" disabled>${missing ? "Mark missing" : "Put in tote unscanned"}</button></div>`;
+    const valid = () => { const b = $("xyes"); if (b) b.disabled = !(path && reason && $("ok")?.checked && (reason !== "other" || $("note")?.value.trim())); };
+    $("mpanel").querySelectorAll("[data-p]").forEach((b) => b.onclick = () => { path = b.dataset.p; reason = ""; draw(); });
+    $("mpanel").querySelectorAll("[data-r]").forEach((b) => b.onclick = () => { reason = b.dataset.r; draw(); });
+    $("chg")?.addEventListener("click", () => { path = ""; reason = ""; draw(); });
+    $("qm")?.addEventListener("click", () => { qty = Math.max(1, qty - 1); draw(); });
+    $("qp")?.addEventListener("click", () => { qty = Math.min(left, qty + 1); draw(); });
+    $("ok")?.addEventListener("change", valid); $("note")?.addEventListener("input", valid);
+    $("xno").onclick = () => { $("modal").hidden = true; };
+    $("xyes").onclick = async () => { $("xyes").disabled = true;
+      const apiReason = reason === "wrong_barcode" ? "barcode_wont_scan" : reason;
+      const note = reason === "wrong_barcode" ? `Barcode scans as a different product${$("note")?.value.trim() ? ": " + $("note").value.trim() : ""}` : ($("note")?.value.trim() || null);
+      try { const r = await rpc("wms_pick_exception", { p_task_id: t.id, p_reason: apiReason, p_confirmed: true, p_qty: missing ? left : qty, p_note: note });
+        $("modal").hidden = true;
+        if (!r.ok) { bad(); return msg(r.error, "bad"); }
+        tone(600, 120); binOk = r.current?.task?.id === t.id; state = r; route();
+        msg(r.kind === "missing" ? `${r.qty} × ${t.sku} marked MISSING. The packer will be alerted.` : `${r.qty} × ${t.sku} in the tote unscanned. The packer will check it.`, r.kind === "missing" ? "bad" : "warn");
+      } catch (e) { $("modal").hidden = true; bad(); msg(e.message, "bad"); } };
+    valid(); };
+  draw(); $("modal").hidden = false;
+}
+
+// quick count fix: set how many of this item are really in this location
+function countBox(t) {
+  const was = t.bin_on_hand ?? 0;
+  let q = String(was), reason = "", typed = false;
+  const REASONS = [["more_here", "More here than the WMS showed"], ["fewer_here", "Fewer here than the WMS showed"], ["damaged", "Damaged stock taken out"], ["other", "Other (write a note)"]];
+  const draw = () => {
+    const n = Number(q || 0), diff = n - was;
+    if (!reason || (reason === "more_here" && diff < 0) || (reason === "fewer_here" && diff > 0) || (reason === "damaged" && diff > 0) || (diff === 0 && reason !== "other")) reason = diff > 0 ? "more_here" : diff < 0 ? "fewer_here" : "";
+    $("mpanel").innerHTML = `<h2>Fix the count at ${esc(t.bin)}</h2>
+    <div class="mono">${esc(t.sku)}${t.variant ? " · " + esc(t.variant) : ""}</div>
+    <div class="qtyrow" style="align-items:center"><div><div class="step">WMS says</div><div class="qtyshow" style="font-size:40px;text-align:left">${was}</div></div>
+      <div style="text-align:right"><div class="step">Actually here</div><div class="qtyshow" id="cv">${q || "0"}</div></div></div>
+    <div class="msg ${diff === 0 ? "" : diff > 0 ? "good" : "warn"}" style="font-size:18px">${diff === 0 ? "Count every one in the location, including the ones you're about to pick, then type the total." : diff > 0 ? `Adds ${diff} to this location.` : `Takes ${-diff} out of this location.`}</div>
+    <div class="pad">${[1,2,3,4,5,6,7,8,9].map((d) => `<button data-n="${d}">${d}</button>`).join("")}<button data-n="C">Clear</button><button data-n="0">0</button><button data-n="B">⌫</button></div>
+    ${diff !== 0 ? `<div class="step">Why?</div><div class="opts">${REASONS.filter(([k]) => !(k === "more_here" && diff < 0) && !(k === "fewer_here" && diff > 0) && !(k === "damaged" && diff > 0))
+        .map(([k, l]) => `<button data-r="${k}" class="${k === reason ? "on" : ""}">${l}</button>`).join("")}</div>
+      ${reason === "other" ? `<input id="note" placeholder="What happened?" style="font-size:18px">` : ""}
+      <div class="mono">Recorded against your name.</div>` : ""}
+    <div class="btns"><button class="ghost" id="cno">Cancel</button><button class="signal" id="cyes" ${diff === 0 || !reason ? "disabled" : ""}>Save count: ${n}</button></div>`;
+    $("mpanel").querySelectorAll("[data-n]").forEach((b) => b.onclick = () => { const d = b.dataset.n;
+      q = d === "C" ? "" : d === "B" ? q.slice(0, -1) : (!typed ? d : (q + d).replace(/^0+(?=\d)/, "")).slice(0, 4); typed = d !== "C" && d !== "B" ? true : typed; draw(); });
+    $("mpanel").querySelectorAll("[data-r]").forEach((b) => b.onclick = () => { reason = b.dataset.r; draw(); });
+    const v = () => { $("cyes").disabled = !(diff !== 0 && reason && (reason !== "other" || $("note")?.value.trim())); };
+    $("note")?.addEventListener("input", v); v();
+    $("cno").onclick = () => { $("modal").hidden = true; };
+    $("cyes").onclick = async () => { $("cyes").disabled = true;
+      try {
+        const r = await rpc("wms_pick_adjust_bin", { p_task_id: t.id, p_new_qty: n, p_reason: reason, p_note: $("note")?.value.trim() || null });
+        if (!r.ok) { bad();
+          if (r.error === "BELOW_RESERVED") { $("modal").hidden = true; return msg(`Can't set it below ${r.reserved}: ${r.reserved} are already booked for picks here (${r.this_pick} for this stop). If there aren't enough, use "Can't pick this" → Not enough in the location.`, "bad"); }
+          $("modal").hidden = true; return msg({ CART_PAUSED: "Cart is paused.", NOT_YOUR_CART: "This isn't your cart.", NOTE_REQUIRED: "Write a note.", NOT_ACTIVE: "This stop is finished." }[r.error] ?? r.error, "bad"); }
+        $("modal").hidden = true; good(); await refresh();
+        msg(`✓ ${t.bin} now has ${r.after} (was ${r.before}).`, "good");
+      } catch (e) { $("modal").hidden = true; bad(); msg(e.message, "bad"); } };
+  };
+  draw(); $("modal").hidden = false;
+}
+
+// pause
+function pauseBox() {
+  $("mpanel").innerHTML = `<h2>Pause ${esc(state.cart)}</h2><div class="opts">
+    ${Object.entries(reasonLabel).filter(([k]) => k !== "unassigned").map(([k, l]) => `<button data-p="${k}">${l}${k === "end_of_shift" ? " (another picker can carry on)" : ""}</button>`).join("")}</div>
+    <div class="btns"><button class="ghost" id="pno">Keep picking</button><span></span></div>`;
+  $("mpanel").querySelectorAll("[data-p]").forEach((b) => b.onclick = async () => {
+    try { const r = await rpc("wms_pick_pause", { p_session_id: state.session_id, p_reason: b.dataset.p }); $("modal").hidden = true;
+      if (!r.ok) return msg(r.error, "bad");
+      tone(700, 120); home(`${r.cart} paused (${reasonLabel[b.dataset.p]}). Scan the cart to carry on.`, "warn");
+    } catch (e) { $("modal").hidden = true; msg(e.message, "bad"); } });
+  $("pno").onclick = () => { $("modal").hidden = true; };
+  $("modal").hidden = false;
+}
+
+// ===================== FINISH: scan the cart again =====================
+function finishScreen() {
+  done();
+  app.innerHTML = `<div class="card" style="border:3px solid var(--green)"><div class="step">All items picked</div>
+    <div class="big" style="font-size:44px">Scan ${esc(state.cart)}'s first tote${chosen?.first_tote ? ` (${esc(chosen.first_tote)})` : ""} to finish</div></div>
+    <div class="typebox"><input id="typecart" placeholder="or type the cart or tote number" inputmode="numeric"><button id="gotype">Finish</button></div>
+    <div id="msg" class="msg">${state.exceptions ? `${state.exceptions} item(s) flagged. The packer will be told.` : "Then take the cart to packing."}</div>`;
+  const fin = async (v) => {
+    try { const r = await rpc("wms_pick_finish_cart", { p_session_id: state.session_id, p_cart: v });
+      if (!r.ok) { bad(); return msg(r.error === "WRONG_CART" ? `That's not ${r.expected}. Scan ${r.expected}.` : r.error, "bad"); }
+      done(); summary(r);
+    } catch (e) { bad(); msg(e.message, "bad"); } };
+  onScan = fin;
+  $("gotype").onclick = () => { const v = $("typecart").value.trim(); if (v) fin(v); };
+}
+function summary(r) {
+  state = null; $("hdr").textContent = "PICKING";
+  app.innerHTML = `<div class="card" style="border:3px solid var(--green)"><div class="step">Cart finished</div><div class="big" style="font-size:44px">${esc(r.cart)} → packing</div></div>
+    <div class="stat"><div><span class="mono">Units</span><b>${r.units}</b></div><div><span class="mono">Orders</span><b>${r.orders}</b></div>
+      <div><span class="mono">Minutes</span><b>${r.minutes}</b></div><div><span class="mono">Units / hour</span><b>${r.units_per_hour ?? "-"}</b></div></div>
+    ${r.missing.length ? `<div class="msg warn">Missing: ${r.missing.map((m) => `${m.qty} × ${esc(m.sku)} (#${esc(m.order_number)})`).join(", ")}</div>` : ""}
+    <button class="signal" id="next" style="min-height:70px;font-size:22px">Next cart</button>`;
+  onScan = () => home("Choose your next cart.");
+  $("next").onclick = () => home("Choose your next cart.");
+}
+
+function confirmBox(title, body, yes) {
+  return new Promise((res) => { $("mpanel").innerHTML = `<h2>${esc(title)}</h2><p style="font-size:18px">${esc(body)}</p>
+    <div class="btns"><button class="ghost" id="cno">Cancel</button><button class="signal" id="cyes">${esc(yes)}</button></div>`;
+    $("modal").hidden = false; $("cyes").onclick = () => { $("modal").hidden = true; res(true); }; $("cno").onclick = () => { $("modal").hidden = true; res(false); }; });
+}
+home();
+</script>
+</body>
+</html>

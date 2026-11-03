@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Staff and PINs · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  .add{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr auto;gap:8px;align-items:end}
+  .add label{display:grid;gap:4px}
+  .pinbox{display:none;margin:12px 0;padding:16px;background:var(--ink);color:#fff;border-left:6px solid var(--orange)}
+  .pinbox.on{display:block}
+  .pinbox .big{font:600 44px/1.1 "IBM Plex Mono",monospace;letter-spacing:.2em;color:#fff;margin:6px 0}
+  .pinbox .mono{color:#ccc}
+  .pinbox button{margin-top:10px;background:#fff;color:#111;border-color:#fff}
+  td select{min-height:38px;padding:6px 8px;width:auto}
+  td button{min-height:38px;padding:0 12px;font-size:14px}
+  .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  tr.off td{color:var(--muted)}
+  .help{margin-top:10px;font-size:14px}
+  @media (max-width:800px){.add{grid-template-columns:1fr 1fr}.add button{grid-column:1/-1}}
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc">STAFF AND PINS</span><button class="ghost" id="out" style="border-color:#fff">Sign out</button></div>
+<main class="wrap">
+  <div id="pinbox" class="pinbox" role="status">
+    <span class="mono" id="pinwho"></span>
+    <div class="big" id="pinval"></div>
+    <span class="mono">Write this down and give it to the person. It is not shown again.</span><br>
+    <button id="pindone">Done, hide PIN</button>
+  </div>
+
+  <section class="panel" id="addpanel" hidden>
+    <div class="kicker"><h2>Add a person</h2><span class="mono">STF.01</span></div>
+    <div class="add">
+      <label><span class="mono">Name</span><input id="n" placeholder="eg Matthew Smith" autocomplete="off"></label>
+      <label><span class="mono">Username</span><input id="u" placeholder="eg matthew" autocapitalize="none" spellcheck="false" autocomplete="off"></label>
+      <label><span class="mono">Role</span><select id="r"></select></label>
+      <label><span class="mono">PIN (blank = random)</span><input id="p" inputmode="numeric" maxlength="6" placeholder="6 digits" autocomplete="off"></label>
+      <button class="signal" id="add">Add</button>
+    </div>
+    <div id="adderr" class="err"></div>
+    <p class="help">Usernames: lower case letters, numbers, dot, dash or underscore (eg <b>matthew.s</b>). For the warehouse TV, add a person called <b>Warehouse TV</b>, username <b>tv</b>, role <b>TV screen</b>.</p>
+  </section>
+
+  <section class="panel" style="margin-top:12px">
+    <div class="kicker"><h2>Staff</h2><span class="mono" id="cnt"></span></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th class="hide-sm">PIN set</th><th>Status</th><th></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="6" class="mono">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div id="err" class="err"></div>
+  </section>
+  <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
+</main>
+<script type="module">
+import { sb, requireLogin, signOut, esc, clearLogin } from "/js/app.js?v=5";
+const ROLES = [["picker","Picker"],["packer","Packer"],["receiver","Receiver"],["supervisor","Supervisor"],["admin","Admin"],["display","TV screen"]];
+const label = (r) => (ROLES.find(x => x[0] === r) ?? [r, r])[1];
+const m = await requireLogin();
+if (m && !["admin","supervisor"].includes(m.role)) location.href = "/index.html";
+const isAdmin = m?.role === "admin";
+document.getElementById("out").onclick = signOut;
+document.getElementById("r").innerHTML = ROLES.map(([v, t]) => `<option value="${v}">${t}</option>`).join("");
+document.getElementById("addpanel").hidden = !isAdmin;
+
+async function call(body) {
+  const { data, error } = await sb.functions.invoke("staff-admin", { body });
+  if (error) {
+    let msg = error.message;
+    try { const j = await error.context.json(); msg = j.error ?? msg; } catch {}
+    if (msg === "NOT_SIGNED_IN") { await clearLogin(); location.href = "/index.html?next=/staff.html"; }
+    throw new Error(msg);
+  }
+  if (!data?.ok) throw new Error(data?.error ?? "Something went wrong");
+  return data;
+}
+function showPin(who, pin) {
+  document.getElementById("pinwho").textContent = `PIN for ${who}`;
+  document.getElementById("pinval").textContent = pin;
+  document.getElementById("pinbox").classList.add("on");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+document.getElementById("pindone").onclick = () => {
+  document.getElementById("pinbox").classList.remove("on");
+  document.getElementById("pinval").textContent = "";
+};
+
+async function load() {
+  const err = document.getElementById("err"); err.textContent = "";
+  try {
+    const { staff } = await call({ action: "list" });
+    document.getElementById("cnt").textContent = `${staff.filter(s => s.is_active).length} ACTIVE`;
+    document.getElementById("rows").innerHTML = staff.map(row).join("") || `<tr><td colspan="6">No staff yet.</td></tr>`;
+  } catch (e) { err.textContent = e.message; }
+}
+function row(s) {
+  const self = s.username === m.username;
+  const role = isAdmin && !self
+    ? `<select data-role="${esc(s.username)}">${ROLES.map(([v, t]) => `<option value="${v}"${v === s.role ? " selected" : ""}>${t}</option>`).join("")}</select>`
+    : `<span class="chip ink">${esc(label(s.role))}</span>`;
+  const canReset = isAdmin || s.role !== "admin" || self;
+  const acts = [
+    canReset && s.is_active ? `<button class="ghost" data-reset="${esc(s.username)}" data-name="${esc(s.display_name)}">Reset PIN</button>` : "",
+    isAdmin && !self ? `<button class="ghost" data-active="${esc(s.username)}" data-to="${!s.is_active}">${s.is_active ? "Deactivate" : "Reactivate"}</button>` : "",
+  ].join("");
+  const set = s.pin_set_at ? new Date(s.pin_set_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "-";
+  return `<tr class="${s.is_active ? "" : "off"}"><td><b>${esc(s.display_name)}</b>${self ? ' <span class="mono">(you)</span>' : ""}</td>
+    <td class="mono" style="text-transform:none">${esc(s.username)}</td><td>${role}</td><td class="hide-sm">${set}</td>
+    <td>${s.is_active ? '<span class="chip green">Active</span>' : '<span class="chip red">Off</span>'}</td><td><div class="acts">${acts}</div></td></tr>`;
+}
+
+document.getElementById("rows").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  const err = document.getElementById("err"); err.textContent = "";
+  try {
+    if (b.dataset.reset) {
+      if (!confirm(`Give ${b.dataset.name} a new PIN? Their old PIN stops working straight away.`)) return;
+      const r = await call({ action: "set_pin", username: b.dataset.reset });
+      showPin(b.dataset.name, r.pin);
+    } else if (b.dataset.active) {
+      const on = b.dataset.to === "true";
+      if (!on && !confirm(`Deactivate ${b.dataset.active}? They will not be able to log in.`)) return;
+      await call({ action: "set_active", username: b.dataset.active, active: on });
+    }
+    await load();
+  } catch (e) { err.textContent = e.message; }
+});
+document.getElementById("rows").addEventListener("change", async (ev) => {
+  const sel = ev.target.closest("select[data-role]"); if (!sel) return;
+  const err = document.getElementById("err"); err.textContent = "";
+  try { await call({ action: "set_role", username: sel.dataset.role, role: sel.value }); await load(); }
+  catch (e) { err.textContent = e.message; await load(); }
+});
+
+document.getElementById("add").onclick = async () => {
+  const e = document.getElementById("adderr"); e.textContent = "";
+  const name = document.getElementById("n").value.trim();
+  const username = document.getElementById("u").value.trim().toLowerCase();
+  const pin = document.getElementById("p").value.trim();
+  if (!name || !username) { e.textContent = "Enter a name and a username."; return; }
+  if (pin && !/^\d{6}$/.test(pin)) { e.textContent = "PIN must be exactly 6 digits, or leave it blank."; return; }
+  const btn = document.getElementById("add"); btn.disabled = true;
+  try {
+    const r = await call({ action: "create", username, display_name: name, role: document.getElementById("r").value, pin: pin || undefined });
+    showPin(`${name} (username ${username})`, r.pin);
+    for (const id of ["n","u","p"]) document.getElementById(id).value = "";
+    await load();
+  } catch (x) {
+    e.textContent = /already been registered|duplicate/i.test(x.message) ? "That username is already taken." : x.message;
+  } finally { btn.disabled = false; }
+};
+load();
+</script>
+</body>
+</html>

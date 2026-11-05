@@ -33,6 +33,14 @@
   .sh{background:rgba(217,101,59,.06)} .wm{background:rgba(90,115,176,.06)}
   .legend{background:var(--panel);border-left:4px solid var(--blue);padding:10px 12px;margin-bottom:12px;font-size:14px;line-height:1.5}
   .check{font-size:13px;margin:-4px 0 10px}
+  .ign{font-size:13px;margin:-4px 0 12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .ign a{color:var(--blue);font-weight:800;cursor:pointer;text-decoration:underline}
+  .act{min-height:32px;font-size:12px;padding:0 10px;white-space:nowrap}
+  .tag{display:inline-block;font:800 11px Archivo,sans-serif;letter-spacing:.04em;padding:3px 7px;background:var(--muted);color:#fff;text-transform:uppercase}
+  .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
+  .modal .panel{max-width:520px;width:100%;background:var(--surface);padding:18px;border-top:6px solid var(--ink)}
+  .modal label{display:grid;gap:4px;margin:10px 0} .modal select,.modal input{min-height:42px}
+  .modal .row{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
   @media (max-width:1000px){.tiles{grid-template-columns:repeat(3,1fr)}}
   @media (max-width:600px){.tiles{grid-template-columns:1fr 1fr}.filters label{flex:1 1 100%!important;min-width:0!important}.filters label input,.filters label select{width:100%!important}}
   @media print{
@@ -58,6 +66,7 @@
     <b>WMS free</b> = units in bin locations minus units still to pick for open orders.
     <b>Difference</b> = WMS free minus Shopify free. <span style="color:var(--blue);font-weight:800">+</span> = more in the bins than Shopify thinks, <span style="color:var(--red);font-weight:800">−</span> = fewer in the bins.
     <br><span class="dot green"></span> <b>Green</b> = match (0) &nbsp; <span class="dot amber"></span> <b>Amber</b> = 1 to 2 units out &nbsp; <span class="dot red"></span> <b>Red</b> = 3 or more units out, or the item is only in one system.
+    <br><b>Not checked:</b> dropship products (tagged <span class="mono">dropshipping</span> in Shopify) and kits / bundles (names or SKUs like Bundle, Mystery Box, Pack, Package, "+", 3PK, 10PK, -PAIR that have never had stock in a bin location). Use <b>Ignore</b> on a row for anything else that should not be checked.
     <br><span class="small">Shopify is read once when you press Get latest; the WMS side is live each time you run the report. Orders reach the WMS from ShipStation every 5 minutes, so a brand-new order can show as a small difference until it arrives.</span>
   </div>
 
@@ -70,11 +79,12 @@
     <div class="tile" data-show="all"><div class="mono">SKUs checked</div><div class="n" id="tChecked">-</div></div>
   </div>
   <p class="check small" id="check"></p>
+  <p class="ign noprint" id="ign"></p>
 
   <div class="filters">
     <label><span class="mono">Show</span><select id="show" style="width:240px">
       <option value="diff">Differences (red + amber)</option><option value="red">Red only</option><option value="amber">Amber only</option>
-      <option value="green">Matches only</option><option value="all">Everything</option></select></label>
+      <option value="green">Matches only</option><option value="all">Everything</option><option value="ignored">Not checked (dropship, kits, ignored)</option></select></label>
     <label style="flex:1;min-width:200px"><span class="mono">Search</span><input id="q" placeholder="SKU, product or location"></label>
     <label><span class="mono">Sort</span><select id="sort" style="width:260px">
       <option value="urgent">Red first, biggest difference</option><option value="loc">By location (walk the shelves)</option>
@@ -87,13 +97,13 @@
   <p class="small" id="count"></p>
   <div style="overflow-x:auto"><table>
     <thead>
-      <tr><th colspan="2"></th><th colspan="3" class="grp sh">SHOPIFY</th><th colspan="3" class="grp wm">WMS</th><th colspan="2"></th></tr>
+      <tr><th colspan="2"></th><th colspan="3" class="grp sh">SHOPIFY</th><th colspan="3" class="grp wm">WMS</th><th colspan="3"></th></tr>
       <tr><th></th><th>Product</th>
         <th class="num sh">On hand</th><th class="num sh">Committed</th><th class="num sh">Free</th>
         <th class="num wm">In bins</th><th class="num wm">To pick</th><th class="num wm">Free</th>
-        <th class="num">Difference</th><th>Locations</th></tr>
+        <th class="num">Difference</th><th>Locations</th><th class="noprint"></th></tr>
     </thead>
-    <tbody id="rows"><tr><td colspan="10" class="mono">Loading…</td></tr></tbody>
+    <tbody id="rows"><tr><td colspan="11" class="mono">Loading…</td></tr></tbody>
   </table></div>
   <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
 </main>
@@ -144,16 +154,19 @@ function render() {
   $("tOver").textContent = fmt(t.over_units); $("tUnder").textContent = fmt(t.under_units); $("tChecked").textContent = fmt(t.checked);
   document.querySelectorAll(".tile[data-show]").forEach((el) => el.classList.toggle("on", el.dataset.show === $("show").value));
   $("stamp").textContent = `RUN ${when(data.generated_at)}`;
+  $("ign").innerHTML = data.pulled_at ? `Not checked: <b>${fmt(t.ignored_dropship)}</b> dropship, <b>${fmt(t.ignored_kit)}</b> kits / bundles${t.ignored_other ? `, <b>${fmt(t.ignored_other)}</b> other` : ""}.
+    <a id="seeIgn">${$("show").value === "ignored" ? "Back to differences" : "See them"}</a>` : "";
+  if ($("seeIgn")) $("seeIgn").onclick = () => { $("show").value = $("show").value === "ignored" ? "diff" : "ignored"; run(); };
   $("check").textContent = data.pulled_at
     ? `Totals: Shopify on hand ${fmt(t.sh_on_hand)}, committed ${fmt(t.sh_committed)} · WMS in bins ${fmt(t.in_bins)}, still to pick ${fmt(t.to_pick)}, picked not sent ${fmt(t.picked)}.` : "";
   pullInfo(data.pull, data.last_error);
   $("count").textContent = data.pulled_at ? (data.total_rows > data.shown ? `Showing the first ${fmt(data.shown)} of ${fmt(data.total_rows)}. Use search to narrow it down, or CSV.` : `${fmt(data.shown)} rows`) : "";
-  if (!data.pulled_at) { $("rows").innerHTML = `<tr><td colspan="10">No Shopify figures yet. Press <b>Get latest from Shopify</b> (takes about a minute).</td></tr>`; return; }
+  if (!data.pulled_at) { $("rows").innerHTML = `<tr><td colspan="11">No Shopify figures yet. Press <b>Get latest from Shopify</b> (takes about a minute).</td></tr>`; return; }
   const rows = sorted();
   $("rows").innerHTML = rows.length ? rows.map((r) => `<tr>
     <td><span class="dot ${r.level}" title="${r.level}"></span></td>
     <td>${r.product ? `<b>${esc(r.product)}</b>` : `<i>Unknown product</i>`}${r.variant ? ` <span class="mono">${esc(r.variant)}</span>` : ""}<div class="sku">${esc(r.sku)}</div>
-      ${r.note ? `<div class="note">${esc(r.note)}</div>` : ""}</td>
+      ${r.note ? `<div class="note">${esc(r.note)}</div>` : ""}${ignoredInfo(r)}</td>
     <td class="num sh">${fmt(r.sh_on_hand)}</td>
     <td class="num sh">${r.sh_committed ? fmt(r.sh_committed) : "-"}</td>
     <td class="big sh">${fmt(r.sh_free)}</td>
@@ -161,9 +174,50 @@ function render() {
     <td class="num wm">${r.to_pick ? `${fmt(r.to_pick)}<div class="small">${r.orders} order${r.orders === 1 ? "" : "s"}</div>` : "-"}${r.picked ? `<div class="small">${r.picked} picked, not sent</div>` : ""}</td>
     <td class="big wm">${fmt(r.wms_free)}</td>
     <td class="diff ${r.diff > 0 ? "plus" : r.diff < 0 ? "minus" : ""}">${signed(r.diff)}</td>
-    <td>${r.locs.length ? locs(r) : `<span class="small">None</span>`}</td></tr>`).join("")
-    : `<tr><td colspan="10">Nothing to show with these filters.</td></tr>`;
+    <td>${r.locs.length ? locs(r) : `<span class="small">None</span>`}</td>
+    <td class="noprint">${actions(r)}</td></tr>`).join("")
+    : `<tr><td colspan="11">Nothing to show with these filters.</td></tr>`;
 }
+
+// ---- Ignore / un-ignore ----
+const WHY = { dropship: "Dropship", kit: "Kit / bundle", other: "Ignored" };
+function ignoredInfo(r) {
+  if (r.ignored) return `<div style="margin-top:4px"><span class="tag">${WHY[r.ignored] ?? r.ignored}</span>
+    <span class="small">${r.ignore_how === "manual" ? `marked by ${esc(r.ignore_by ?? "staff")}${r.ignore_note ? `: ${esc(r.ignore_note)}` : ""}` : r.ignored === "dropship" ? "tagged dropship in Shopify" : "matched the kit / bundle rule"}</span></div>`;
+  if (r.forced_in) return `<div class="small" style="margin-top:4px">Always checked (set by ${esc(r.ignore_by ?? "staff")})</div>`;
+  return "";
+}
+function actions(r) {
+  const s = esc(r.sku);
+  if (r.ignored === "dropship" && r.ignore_how === "auto") return `<button class="ghost act" data-act="include" data-sku="${s}">Check it anyway</button>`;
+  if (r.ignored && r.ignore_how === "manual") return `<button class="ghost act" data-act="auto" data-sku="${s}">Stop ignoring</button>`;
+  if (r.ignored) return `<button class="ghost act" data-act="include" data-sku="${s}">Not a kit, check it</button>`;
+  if (r.forced_in) return `<button class="ghost act" data-act="auto" data-sku="${s}">Use the rules</button>`;
+  return `<button class="ghost act" data-act="ignore" data-sku="${s}">Ignore</button>`;
+}
+async function setIgnore(sku, mode, reason, note) {
+  const { data: r, error } = await sb.rpc("wms_recon_set_ignore", { p_sku: sku, p_mode: mode, p_reason: reason ?? "kit", p_note: note ?? null });
+  if (error || !r?.ok) { $("err").textContent = error?.message ?? r?.error ?? "Could not save"; return; }
+  await run();
+}
+function askIgnore(sku) {
+  const row = data.rows.find((x) => x.sku === sku);
+  const m = document.createElement("div"); m.className = "modal";
+  m.innerHTML = `<div class="panel"><h3 style="margin:0 0 6px">Stop checking this SKU?</h3>
+    <div><b>${esc(row?.product ?? "")}</b> <span class="sku">${esc(sku)}</span></div>
+    <label><span class="mono">Why</span><select id="igWhy"><option value="kit">Kit / bundle</option><option value="dropship">Dropship</option><option value="other">Other</option></select></label>
+    <label><span class="mono">Note (optional)</span><input id="igNote" maxlength="200" placeholder="eg made from 2 x TWU-BUM-20KG"></label>
+    <p class="small">It moves to "Not checked". You can undo it there any time.</p>
+    <div class="row"><button class="ghost" id="igNo">Cancel</button><button id="igYes">Ignore it</button></div></div>`;
+  document.body.appendChild(m);
+  m.querySelector("#igNo").onclick = () => m.remove();
+  m.querySelector("#igYes").onclick = async () => { const why = m.querySelector("#igWhy").value, note = m.querySelector("#igNote").value; m.remove(); await setIgnore(sku, "ignore", why, note); };
+}
+$("rows").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  if (b.dataset.act === "ignore") askIgnore(b.dataset.sku);
+  else { b.disabled = true; setIgnore(b.dataset.sku, b.dataset.act); }
+});
 
 // Get latest from Shopify: start the bulk read, then check every 4 seconds until it is saved
 let polling = false;
@@ -200,9 +254,9 @@ $("print").onclick = () => window.print();
 $("csv").onclick = () => {
   if (!data?.rows) return;
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const head = ["Level", "SKU", "Product", "Variant", "Note", "Shopify on hand", "Shopify committed", "Shopify free", "WMS in bins", "WMS to pick", "Open orders", "Picked not sent", "WMS free", "Difference", "Locations"];
+  const head = ["Level", "SKU", "Product", "Variant", "Note", "Shopify on hand", "Shopify committed", "Shopify free", "WMS in bins", "WMS to pick", "Open orders", "Picked not sent", "WMS free", "Difference", "Locations", "Not checked because"];
   const lines = sorted().map((r) => [r.level, r.sku, r.product, r.variant, r.note, r.sh_on_hand, r.sh_committed, r.sh_free, r.in_bins, r.to_pick, r.orders, r.picked, r.wms_free, r.diff,
-    r.locs.map((l) => `${l.code} (${l.qty})`).join("; ")].map(q).join(","));
+    r.locs.map((l) => `${l.code} (${l.qty})`).join("; "), r.ignored ? `${WHY[r.ignored] ?? r.ignored} (${r.ignore_how})` : ""].map(q).join(","));
   const blob = new Blob([head.map(q).join(",") + "\n" + lines.join("\n")], { type: "text/csv" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
   a.download = `twl-inventory-recon-${new Date().toLocaleDateString("en-CA", { timeZone: tz })}.csv`; a.click();

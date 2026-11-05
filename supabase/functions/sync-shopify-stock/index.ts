@@ -5,7 +5,9 @@
 // location with ONE Shopify bulk query (no rate limits, ~28k items) and saves it
 // into shopify_stock for the reconciliation report (/recon).
 //
-//   {action:"start"}  -> starts the bulk read (or returns the one already running)
+//   {action:"start"}  -> starts two bulk reads (or returns the ones already running):
+//                        stock at the TWL location, and the SKUs of products tagged
+//                        "dropshipping"/"dropship" (skipped by the report, migration 039)
 //   {action:"status"} -> checks it; when Shopify has finished, downloads the file,
 //                        saves every row, then switches the report to this pull
 //
@@ -78,8 +80,31 @@ const BULK_QUERY = `{
   }
 }`;
 
+const DROPSHIP_QUERY = `{
+  products(query: "tag:dropshipping OR tag:dropship") {
+    edges { node { id variants { edges { node { sku } } } } }
+  }
+}`;
+
 type State = { run_at?: string; op_id?: string; op_status?: string; started_at?: string; finished_at?: string;
-               items?: number; imported_op?: string; started_by?: string };
+               items?: number; imported_op?: string; started_by?: string;
+               ds_op_id?: string; ds_status?: string; dropship_skus?: number };
+
+async function runBulk(q: string) {
+  const d = await gql(`mutation($q: String!) {
+    bulkOperationRunQuery(query: $q, groupObjects: false) { bulkOperation { id status createdAt } userErrors { field message } }
+  }`, { q });
+  const p = d.bulkOperationRunQuery;
+  if (p.userErrors?.length) throw new Error(`Shopify: ${p.userErrors.map((e: { message: string }) => e.message).join("; ")}`);
+  return p.bulkOperation as { id: string; status: string };
+}
+async function bulkInfo(id: string) {
+  const d = await gql(`query($id: ID!) { node(id: $id) { ... on BulkOperation {
+      id status errorCode objectCount url partialDataUrl completedAt } } }`, { id });
+  if (!d.node) throw new Error("Shopify bulk read not found");
+  return d.node as { status: string; errorCode: string | null; objectCount: string; url: string | null };
+}
+const BAD = ["FAILED", "CANCELED", "EXPIRED"];
 
 async function getState(): Promise<{ cur: State; last_error: string | null }> {
   const { data } = await db.from("sync_state").select("cursor,last_error").eq("system", "shopify_stock").maybeSingle();
@@ -93,16 +118,13 @@ async function saveState(cur: State, patch: Record<string, unknown> = {}) {
 
 async function start(who: string) {
   const { cur } = await getState();
-  if (cur.op_id && ["CREATED", "RUNNING"].includes(cur.op_status ?? "")) {
+  if (cur.op_id && cur.imported_op !== cur.op_id && !BAD.includes(cur.op_status ?? "")) {
     const st = await status();                       // already running: just report it
-    if (["CREATED", "RUNNING"].includes(st.op_status ?? "")) return { ...st, already_running: true };
+    if (st.imported_op !== st.op_id && !BAD.includes(st.op_status ?? "")) return { ...st, already_running: true };
   }
-  const d = await gql(`mutation($q: String!) {
-    bulkOperationRunQuery(query: $q, groupObjects: false) { bulkOperation { id status createdAt } userErrors { field message } }
-  }`, { q: BULK_QUERY });
-  const p = d.bulkOperationRunQuery;
-  if (p.userErrors?.length) throw new Error(`Shopify: ${p.userErrors.map((e: { message: string }) => e.message).join("; ")}`);
-  const next: State = { ...cur, op_id: p.bulkOperation.id, op_status: p.bulkOperation.status,
+  const op = await runBulk(BULK_QUERY);
+  const ds = await runBulk(DROPSHIP_QUERY);
+  const next: State = { ...cur, op_id: op.id, op_status: op.status, ds_op_id: ds.id, ds_status: ds.status,
                         started_at: new Date().toISOString(), finished_at: undefined, started_by: who };
   await saveState(next, { last_error: null });
   return next;
@@ -112,19 +134,36 @@ async function status() {
   const { cur } = await getState();
   if (!cur.op_id) return cur;
   if (cur.imported_op === cur.op_id) return cur;                       // already done
-  const d = await gql(`query($id: ID!) { node(id: $id) { ... on BulkOperation {
-      id status errorCode objectCount url partialDataUrl completedAt } } }`, { id: cur.op_id });
-  const op = d.node;
-  if (!op) throw new Error("Shopify bulk read not found");
+  const op = await bulkInfo(cur.op_id);
   cur.op_status = op.status;
-  if (["FAILED", "CANCELED", "EXPIRED"].includes(op.status)) {
-    await saveState(cur, { last_error: `Shopify bulk read ${op.status}${op.errorCode ? ` (${op.errorCode})` : ""}` });
+  const ds = cur.ds_op_id ? await bulkInfo(cur.ds_op_id) : null;
+  if (ds) cur.ds_status = ds.status;
+  if (BAD.includes(op.status) || (ds && BAD.includes(ds.status))) {
+    const bad = BAD.includes(op.status) ? op : ds!;
+    await saveState(cur, { last_error: `Shopify bulk read ${bad.status}${bad.errorCode ? ` (${bad.errorCode})` : ""}` });
     return cur;
   }
-  if (op.status !== "COMPLETED") { await saveState(cur); return { ...cur, objects: Number(op.objectCount) }; }
+  if (op.status !== "COMPLETED" || (ds && ds.status !== "COMPLETED")) { await saveState(cur); return { ...cur, objects: Number(op.objectCount) }; }
 
   // Finished: download the JSONL (one line per inventory level) and save it in chunks
   const runAt = new Date().toISOString();
+  let dsCount = 0;
+  if (ds?.url) {                                                       // variant lines carry a sku
+    const res = await fetch(ds.url);
+    if (!res.ok) throw new Error(`Download ${res.status}`);
+    const skus = new Set<string>();
+    for (const line of (await res.text()).split("\n")) {
+      if (!line.trim()) continue;
+      const n = JSON.parse(line);
+      if (typeof n.sku === "string" && n.sku.trim()) skus.add(n.sku.trim());
+    }
+    const list = [...skus];
+    for (let i = 0; i < list.length; i += 5000) {
+      const { data, error } = await db.rpc("wms_import_shopify_dropship", { p_run_at: runAt, p_skus: list.slice(i, i + 5000) });
+      if (error) throw new Error(`wms_import_shopify_dropship: ${error.message}`);
+      dsCount += data as number;
+    }
+  }
   let rows: Record<string, unknown>[] = [], saved = 0;
   const flush = async () => {
     if (!rows.length) return;
@@ -149,7 +188,7 @@ async function status() {
     await flush();
   }
   // switch the report over to this pull only now that every row is in
-  const next: State = { ...cur, run_at: runAt, finished_at: new Date().toISOString(), items: saved, imported_op: cur.op_id, op_status: "COMPLETED" };
+  const next: State = { ...cur, run_at: runAt, finished_at: new Date().toISOString(), items: saved, imported_op: cur.op_id, op_status: "COMPLETED", dropship_skus: dsCount };
   await saveState(next, { last_ok_at: new Date().toISOString(), last_error: null });
   return next;
 }

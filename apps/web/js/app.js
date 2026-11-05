@@ -46,6 +46,7 @@ export const ACCESS = {
   history: ["admin", "supervisor"],
   staff:   ["admin", "supervisor"],
   replenish: ["admin", "supervisor"],
+  recon:   ["admin", "supervisor"],
   settings: ["admin"],
 };
 export const canOpen = (role, page) => (ACCESS[page] ?? []).includes(role);

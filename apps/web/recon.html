@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Inventory reconciliation · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  .wrap{max-width:1500px}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:10px}
+  .filters label{display:grid;gap:4px}
+  .filters input,.filters select{min-height:42px}
+  .pull{display:flex;gap:12px;flex-wrap:wrap;align-items:center;background:var(--panel);border-left:4px solid var(--orange);padding:10px 12px;margin-bottom:10px}
+  .pull b{font-family:"IBM Plex Mono",monospace}
+  .tiles{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:10px}
+  .tile{background:var(--surface);border:1px solid var(--rule);padding:12px;cursor:default}
+  .tile[data-show]{cursor:pointer} .tile.on{outline:3px solid var(--ink)}
+  .tile .n{font:900 34px/1 Archivo,sans-serif;color:var(--ink);margin-top:6px}
+  .tile.red{border-top:6px solid var(--red)} .tile.amber{border-top:6px solid var(--amber)} .tile.green{border-top:6px solid var(--green)}
+  .tile.ink{border-top:6px solid var(--ink)} .tile.blue{border-top:6px solid var(--blue)}
+  td{font-size:14px;vertical-align:top}
+  th.grp{text-align:center;border-bottom:3px solid var(--rule)}
+  .sku{font:600 13px "IBM Plex Mono",monospace;color:var(--muted)}
+  .small{font-size:12px;color:var(--muted)}
+  .note{font-size:12px;font-weight:700;color:var(--red)}
+  .dot{display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:middle}
+  .dot.red{background:var(--red)} .dot.amber{background:var(--amber)} .dot.green{background:var(--green)}
+  .big{font:900 18px "IBM Plex Mono",monospace;text-align:right;white-space:nowrap}
+  .diff{font:900 22px "IBM Plex Mono",monospace;text-align:right;white-space:nowrap}
+  .diff.plus{color:var(--blue)} .diff.minus{color:var(--red)}
+  .loc{font:500 13px "IBM Plex Mono",monospace;white-space:nowrap}
+  .sh{background:rgba(217,101,59,.06)} .wm{background:rgba(90,115,176,.06)}
+  .legend{background:var(--panel);border-left:4px solid var(--blue);padding:10px 12px;margin-bottom:12px;font-size:14px;line-height:1.5}
+  .check{font-size:13px;margin:-4px 0 10px}
+  @media (max-width:1000px){.tiles{grid-template-columns:repeat(3,1fr)}}
+  @media (max-width:600px){.tiles{grid-template-columns:1fr 1fr}.filters label{flex:1 1 100%!important;min-width:0!important}.filters label input,.filters label select{width:100%!important}}
+  @media print{
+    .bar,.filters,.noprint,.foot,.pull button{display:none!important}
+    body{background:#fff} .wrap{max-width:none;padding:0} td,th{padding:4px 5px;font-size:11px} .diff{font-size:14px} .big{font-size:12px}
+    .tiles{grid-template-columns:repeat(6,1fr)} .tile .n{font-size:20px} tr{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc">INVENTORY RECONCILIATION</span><button class="ghost" id="out" style="border-color:#fff">Sign out</button></div>
+<main class="wrap">
+  <div class="kicker"><h2>Shopify stock vs stock in bin locations</h2><span class="mono" id="stamp">RECON.01</span></div>
+
+  <div class="pull">
+    <span>Shopify figures from: <b id="pulled">never pulled</b></span>
+    <span class="small" id="pullState"></span>
+    <button class="signal" id="pullBtn">Get latest from Shopify</button>
+  </div>
+
+  <div class="legend noprint">
+    <b>How it works.</b> <b>Shopify free</b> = Shopify on hand (TWL location) minus committed (sold, not sent yet).
+    <b>WMS free</b> = units in bin locations minus units still to pick for open orders.
+    <b>Difference</b> = WMS free minus Shopify free. <span style="color:var(--blue);font-weight:800">+</span> = more in the bins than Shopify thinks, <span style="color:var(--red);font-weight:800">−</span> = fewer in the bins.
+    <br><span class="dot green"></span> <b>Green</b> = match (0) &nbsp; <span class="dot amber"></span> <b>Amber</b> = 1 to 2 units out &nbsp; <span class="dot red"></span> <b>Red</b> = 3 or more units out, or the item is only in one system.
+    <br><span class="small">Shopify is read once when you press Get latest; the WMS side is live each time you run the report. Orders reach the WMS from ShipStation every 5 minutes, so a brand-new order can show as a small difference until it arrives.</span>
+  </div>
+
+  <div class="tiles">
+    <div class="tile red" data-show="red"><div class="mono">Red</div><div class="n" id="tRed">-</div></div>
+    <div class="tile amber" data-show="amber"><div class="mono">Amber</div><div class="n" id="tAmber">-</div></div>
+    <div class="tile green" data-show="green"><div class="mono">Green (match)</div><div class="n" id="tGreen">-</div></div>
+    <div class="tile blue"><div class="mono">Units more in bins</div><div class="n" id="tOver">-</div></div>
+    <div class="tile ink"><div class="mono">Units fewer in bins</div><div class="n" id="tUnder">-</div></div>
+    <div class="tile" data-show="all"><div class="mono">SKUs checked</div><div class="n" id="tChecked">-</div></div>
+  </div>
+  <p class="check small" id="check"></p>
+
+  <div class="filters">
+    <label><span class="mono">Show</span><select id="show" style="width:240px">
+      <option value="diff">Differences (red + amber)</option><option value="red">Red only</option><option value="amber">Amber only</option>
+      <option value="green">Matches only</option><option value="all">Everything</option></select></label>
+    <label style="flex:1;min-width:200px"><span class="mono">Search</span><input id="q" placeholder="SKU, product or location"></label>
+    <label><span class="mono">Sort</span><select id="sort" style="width:260px">
+      <option value="urgent">Red first, biggest difference</option><option value="loc">By location (walk the shelves)</option>
+      <option value="sku">By SKU</option></select></label>
+    <button id="run">Run report</button>
+    <button class="ghost" id="csv">CSV</button>
+    <button class="ghost" id="print">Print</button>
+  </div>
+  <div id="err" class="err"></div>
+  <p class="small" id="count"></p>
+  <div style="overflow-x:auto"><table>
+    <thead>
+      <tr><th colspan="2"></th><th colspan="3" class="grp sh">SHOPIFY</th><th colspan="3" class="grp wm">WMS</th><th colspan="2"></th></tr>
+      <tr><th></th><th>Product</th>
+        <th class="num sh">On hand</th><th class="num sh">Committed</th><th class="num sh">Free</th>
+        <th class="num wm">In bins</th><th class="num wm">To pick</th><th class="num wm">Free</th>
+        <th class="num">Difference</th><th>Locations</th></tr>
+    </thead>
+    <tbody id="rows"><tr><td colspan="10" class="mono">Loading…</td></tr></tbody>
+  </table></div>
+  <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
+</main>
+<script type="module">
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=6";
+await requireLogin();
+const $ = (id) => document.getElementById(id);
+$("out").onclick = signOut;
+const tz = "Australia/Adelaide";
+const when = (t) => new Date(t).toLocaleString("en-AU", { timeZone: tz, weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+const signed = (n) => n > 0 ? `+${fmt(n)}` : n < 0 ? `−${fmt(-n)}` : "0";
+let data = null;
+try { const s = JSON.parse(localStorage.getItem("wms.recon") || "{}"); if (s.show) $("show").value = s.show; if (s.sort) $("sort").value = s.sort; } catch {}
+
+async function run() {
+  $("err").textContent = ""; $("run").disabled = true;
+  try {
+    const { data: d, error } = await sb.rpc("wms_inventory_recon", { p_show: $("show").value, p_search: $("q").value.trim() || null });
+    if (error) { if (/FORBIDDEN|NOT_STAFF|JWT/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/recon.html"; } throw error; }
+    data = d;
+    try { localStorage.setItem("wms.recon", JSON.stringify({ show: $("show").value, sort: $("sort").value })); } catch {}
+    render();
+  } catch (e) { $("err").textContent = e.message; }
+  $("run").disabled = false;
+}
+
+function pullInfo(p, lastError) {
+  $("pulled").textContent = data?.pulled_at ? `${when(data.pulled_at)} (${ago(data.pulled_at)})` : "never pulled";
+  const running = p && ["CREATED", "RUNNING"].includes(p.op_status) && p.imported_op !== p.op_id;
+  $("pullState").innerHTML = running ? `Reading Shopify… ${p.objects ? fmt(p.objects) + " items so far" : ""}`
+    : lastError ? `<span style="color:var(--red)">Last pull failed: ${esc(lastError)}</span>`
+    : p?.items ? `${fmt(p.items)} Shopify items${p.started_by ? `, pulled by ${esc(p.started_by)}` : ""}` : "";
+  $("pullBtn").disabled = !!running;
+  return running;
+}
+
+const locs = (r) => r.locs.slice(0, 3).map((l) => `<div class="loc"><b>${esc(l.code)}</b> ${l.qty}</div>`).join("") + (r.locs.length > 3 ? `<div class="small">+${r.locs.length - 3} more</div>` : "");
+const sorted = () => {
+  const r = [...data.rows], s = $("sort").value;
+  if (s === "loc") r.sort((a, b) => (a.first_loc ?? "~").localeCompare(b.first_loc ?? "~", "en", { numeric: true }) || a.sku.localeCompare(b.sku));
+  if (s === "sku") r.sort((a, b) => a.sku.localeCompare(b.sku, "en", { numeric: true }));
+  return r;
+};
+function render() {
+  const t = data.tiles;
+  $("tRed").textContent = fmt(t.red); $("tAmber").textContent = fmt(t.amber); $("tGreen").textContent = fmt(t.green);
+  $("tOver").textContent = fmt(t.over_units); $("tUnder").textContent = fmt(t.under_units); $("tChecked").textContent = fmt(t.checked);
+  document.querySelectorAll(".tile[data-show]").forEach((el) => el.classList.toggle("on", el.dataset.show === $("show").value));
+  $("stamp").textContent = `RUN ${when(data.generated_at)}`;
+  $("check").textContent = data.pulled_at
+    ? `Totals: Shopify on hand ${fmt(t.sh_on_hand)}, committed ${fmt(t.sh_committed)} · WMS in bins ${fmt(t.in_bins)}, still to pick ${fmt(t.to_pick)}, picked not sent ${fmt(t.picked)}.` : "";
+  pullInfo(data.pull, data.last_error);
+  $("count").textContent = data.pulled_at ? (data.total_rows > data.shown ? `Showing the first ${fmt(data.shown)} of ${fmt(data.total_rows)}. Use search to narrow it down, or CSV.` : `${fmt(data.shown)} rows`) : "";
+  if (!data.pulled_at) { $("rows").innerHTML = `<tr><td colspan="10">No Shopify figures yet. Press <b>Get latest from Shopify</b> (takes about a minute).</td></tr>`; return; }
+  const rows = sorted();
+  $("rows").innerHTML = rows.length ? rows.map((r) => `<tr>
+    <td><span class="dot ${r.level}" title="${r.level}"></span></td>
+    <td>${r.product ? `<b>${esc(r.product)}</b>` : `<i>Unknown product</i>`}${r.variant ? ` <span class="mono">${esc(r.variant)}</span>` : ""}<div class="sku">${esc(r.sku)}</div>
+      ${r.note ? `<div class="note">${esc(r.note)}</div>` : ""}</td>
+    <td class="num sh">${fmt(r.sh_on_hand)}</td>
+    <td class="num sh">${r.sh_committed ? fmt(r.sh_committed) : "-"}</td>
+    <td class="big sh">${fmt(r.sh_free)}</td>
+    <td class="num wm">${fmt(r.in_bins)}</td>
+    <td class="num wm">${r.to_pick ? `${fmt(r.to_pick)}<div class="small">${r.orders} order${r.orders === 1 ? "" : "s"}</div>` : "-"}${r.picked ? `<div class="small">${r.picked} picked, not sent</div>` : ""}</td>
+    <td class="big wm">${fmt(r.wms_free)}</td>
+    <td class="diff ${r.diff > 0 ? "plus" : r.diff < 0 ? "minus" : ""}">${signed(r.diff)}</td>
+    <td>${r.locs.length ? locs(r) : `<span class="small">None</span>`}</td></tr>`).join("")
+    : `<tr><td colspan="10">Nothing to show with these filters.</td></tr>`;
+}
+
+// Get latest from Shopify: start the bulk read, then check every 4 seconds until it is saved
+let polling = false;
+async function poll(action) {
+  const { data: r, error } = await sb.functions.invoke("sync-shopify-stock", { body: { action } });
+  if (error) throw error;
+  if (!r.ok) throw new Error(r.error);
+  return r;
+}
+async function pull() {
+  if (polling) return;
+  polling = true; $("err").textContent = ""; $("pullBtn").disabled = true;
+  try {
+    let r = await poll("start");
+    for (let i = 0; i < 90; i++) {
+      $("pullState").textContent = `Reading Shopify… ${r.objects ? fmt(r.objects) + " items so far" : ""}`;
+      if (r.op_status === "COMPLETED" && r.imported_op === r.op_id) break;
+      if (["FAILED", "CANCELED", "EXPIRED"].includes(r.op_status)) throw new Error(`Shopify read ${r.op_status.toLowerCase()}`);
+      await new Promise((ok) => setTimeout(ok, 4000));
+      r = await poll("status");
+    }
+    await run();
+  } catch (e) { $("err").textContent = `Shopify: ${e.message}`; }
+  polling = false; $("pullBtn").disabled = false;
+}
+
+$("pullBtn").onclick = pull;
+$("run").onclick = run;
+$("show").onchange = run;
+$("sort").onchange = () => { if (data) render(); };
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
+document.querySelectorAll(".tile[data-show]").forEach((el) => el.onclick = () => { $("show").value = el.dataset.show; run(); });
+$("print").onclick = () => window.print();
+$("csv").onclick = () => {
+  if (!data?.rows) return;
+  const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const head = ["Level", "SKU", "Product", "Variant", "Note", "Shopify on hand", "Shopify committed", "Shopify free", "WMS in bins", "WMS to pick", "Open orders", "Picked not sent", "WMS free", "Difference", "Locations"];
+  const lines = sorted().map((r) => [r.level, r.sku, r.product, r.variant, r.note, r.sh_on_hand, r.sh_committed, r.sh_free, r.in_bins, r.to_pick, r.orders, r.picked, r.wms_free, r.diff,
+    r.locs.map((l) => `${l.code} (${l.qty})`).join("; ")].map(q).join(","));
+  const blob = new Blob([head.map(q).join(",") + "\n" + lines.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `twl-inventory-recon-${new Date().toLocaleDateString("en-CA", { timeZone: tz })}.csv`; a.click();
+};
+
+await run();
+// a pull someone else started (or this page reloaded mid-pull): keep checking until it lands
+if (data?.pull && ["CREATED", "RUNNING"].includes(data.pull.op_status) && data.pull.imported_op !== data.pull.op_id) pull();
+</script>
+</body>
+</html>

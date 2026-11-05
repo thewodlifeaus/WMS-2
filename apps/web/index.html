@@ -36,6 +36,7 @@
         <a href="/tv.html" data-page="tv" hidden>Warehouse TV dashboard <span class="chip">SCREEN</span></a>
         <a href="/history.html" data-page="history" hidden>Stock history (who changed what) <span class="chip">LOG</span></a>
         <a href="/replenish.html" data-page="replenish" hidden>Replenishment report (top up shelves) <span class="chip">REPL</span></a>
+        <a href="/recon.html" data-page="recon" hidden>Inventory reconciliation (Shopify vs bins) <span class="chip">RECON</span></a>
         <a href="/staff.html" data-page="staff" hidden>Staff and PINs <span class="chip">TEAM</span></a>
         <a href="/settings.html" data-page="settings" hidden>Settings (carts, totes, locations) <span class="chip ink">SET</span></a>
       </nav>
@@ -53,7 +54,7 @@
   <p class="foot">TRAIN<br>WITHOUT<br>LIMITS.</p>
 </main>
 <script type="module">
-import { sb, signIn, me, signOut, esc, validSession, clearLogin, canOpen } from "/js/app.js?v=5";
+import { sb, signIn, me, signOut, esc, validSession, clearLogin, canOpen } from "/js/app.js?v=6";
 const next = new URLSearchParams(location.search).get("next");
 let me_ = null;
 const show = (id) => { for (const s of ["signin","home"]) document.getElementById(s).hidden = s !== id; };

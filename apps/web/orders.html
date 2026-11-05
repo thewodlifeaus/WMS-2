@@ -44,6 +44,11 @@
   .picks img{width:44px;height:44px;object-fit:cover;background:var(--panel)}
   .bin{font:600 15px "IBM Plex Mono",monospace;color:var(--ink)}
   .split{font:500 12px "IBM Plex Mono",monospace;color:var(--muted)}
+  .hist tr.hrow{cursor:pointer} .hist tr.hrow:hover td{background:var(--panel)} .hist tr.open td{background:var(--panel)}
+  .hist .tl{background:var(--panel);padding:8px 12px 14px} .tl ol{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+  .tl li{display:grid;grid-template-columns:110px 200px 1fr;gap:10px;font-size:14px} .tl li .t{font:600 13px "IBM Plex Mono",monospace;color:var(--muted)}
+  .tl li.evbad b{color:var(--red)} .tl li.evgood b{color:var(--green)}
+  .stg{display:inline-block;font:800 11px Archivo,sans-serif;letter-spacing:.04em;padding:4px 7px;color:#fff;white-space:nowrap;text-transform:uppercase}
   .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
   .modal .panel{max-width:640px;width:100%;max-height:85vh;overflow:auto}
   .last{font-size:13px}
@@ -56,7 +61,7 @@
 <body>
 <div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc">ORDERS AND CARTS</span><button class="ghost" id="out">Sign out</button></div>
 <main class="wrap">
-  <div class="tabs"><button id="t1" class="on">Orders</button><button id="t2">Carts</button></div>
+  <div class="tabs"><button id="t1" class="on">Orders</button><button id="t2">Carts</button><button id="t3">History</button></div>
 
   <section id="ordersTab">
     <div class="toolbar">
@@ -99,6 +104,13 @@
     </div>
     <div class="detail" id="detail" hidden></div>
   </section>
+
+  <section id="historyTab" hidden>
+    <div class="toolbar"><span class="mono" id="histsum">Loading…</span><span style="flex:1"></span><button class="ghost" id="refreshHist">Refresh</button></div>
+    <p class="mono" style="margin:0 0 8px">Every cart built today and on the last working day. Tap a cart to see its timeline.</p>
+    <div style="overflow-x:auto"><table class="hist"><thead><tr><th>Cart</th><th>Type</th><th>Status</th><th>Built</th><th>Picking</th><th class="num">Orders</th><th class="num">Units</th><th class="num">Missing</th><th>Packing</th></tr></thead>
+      <tbody id="hist"><tr><td colspan="9" class="mono">Loading…</td></tr></tbody></table></div>
+  </section>
   <p class="foot noprint">TRAIN<br>WITHOUT<br>LIMITS.</p>
 </main>
 
@@ -112,9 +124,10 @@ const boss = ["admin", "supervisor"].includes(me?.role);
 const $ = (id) => document.getElementById(id);
 $("out").onclick = signOut;
 $("pull").hidden = !boss;
-const tab = (n) => { $("t1").classList.toggle("on", n === 1); $("t2").classList.toggle("on", n === 2);
-  $("ordersTab").hidden = n !== 1; $("cartsTab").hidden = n !== 2; if (n === 2) loadCarts(); };
-$("t1").onclick = () => tab(1); $("t2").onclick = () => tab(2);
+const tab = (n) => { $("t1").classList.toggle("on", n === 1); $("t2").classList.toggle("on", n === 2); $("t3").classList.toggle("on", n === 3);
+  $("ordersTab").hidden = n !== 1; $("cartsTab").hidden = n !== 2; $("historyTab").hidden = n !== 3;
+  if (n === 2) loadCarts(); if (n === 3) loadHistory(); };
+$("t1").onclick = () => tab(1); $("t2").onclick = () => tab(2); $("t3").onclick = () => tab(3);
 function modal(html) { $("mbody").innerHTML = html; $("modal").hidden = false; }
 $("mclose").onclick = () => { $("modal").hidden = true; };
 async function check(error) { if (error && /NOT_STAFF|JWT/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/orders.html"; } }
@@ -289,23 +302,61 @@ loadOrders();
 setInterval(() => { if (!$("ordersTab").hidden && !sel.size && $("modal").hidden) loadOrders(); }, 60000);
 
 // ---------------- carts ----------------
-const SC = { in_progress: ["Picking", "var(--blue)"], assigned: ["Assigned", "var(--amber)"], draft: ["Ready to pick", "var(--green)"], completed: ["Picked", "var(--ink)"] };
+const SC = { in_progress: ["Picking", "var(--blue)"], assigned: ["Assigned", "var(--amber)"], draft: ["Ready to pick", "var(--green)"], completed: ["Picked", "var(--ink)"],
+  ready_to_pack: ["Ready for packing", "var(--orange)"], picked_packed: ["Picked & Packed", "var(--ink)"], taken_apart: ["Taken apart", "var(--muted)"] };
 async function loadCarts() {
   loadRates();
   const { data: d, error } = await sb.rpc("wms_carts_overview");
   if (error) { await check(error); $("carts").innerHTML = `<p class="bad">${esc(error.message)}</p>`; return; }
-  const open = d.filter((c) => c.status !== "completed");
-  $("cartsum").textContent = `${open.length} CARTS OPEN · ${fmt(open.reduce((a, c) => a + c.orders, 0))} ORDERS · ${fmt(open.reduce((a, c) => a + (c.units - c.picked), 0))} UNITS TO PICK · ${d.length - open.length} PICKED TODAY`;
-  $("carts").innerHTML = d.length ? d.map((c) => { const [label, col] = c.paused && !c.picker ? ["Needs a picker", "var(--orange)"] : c.paused ? ["Paused", "var(--amber)"] : SC[c.status] ?? [c.status, "var(--muted)"]; const pct = c.units ? Math.round(100 * c.picked / c.units) : 0;
+  const open = d.filter((c) => c.status !== "completed"), toPack = d.filter((c) => c.stage === "ready_to_pack"), done = d.filter((c) => c.stage === "picked_packed");
+  $("cartsum").textContent = `${open.length} CARTS OPEN · ${fmt(open.reduce((a, c) => a + c.orders, 0))} ORDERS · ${fmt(open.reduce((a, c) => a + (c.units - c.picked), 0))} UNITS TO PICK · ${toPack.length} READY FOR PACKING · ${done.length} PICKED & PACKED TODAY`;
+  $("carts").innerHTML = d.length ? d.map((c) => { const [label, col] = c.paused && !c.picker ? ["Needs a picker", "var(--orange)"] : c.paused ? ["Paused", "var(--amber)"] : SC[c.stage] ?? SC[c.status] ?? [c.status, "var(--muted)"]; const pct = c.units ? Math.round(100 * c.picked / c.units) : 0;
     return `<div class="card" data-s="${c.session_id}"><h3>${esc(c.cart)} <span class="chip" style="background:${col}">${label}</span></h3>
       <div>${grpBadge(c.group)}</div>
       <div><b>${c.orders}</b> orders · <b>${c.units}</b> units · ${c.stops} stops</div>
       <div class="bar2"><i style="width:${pct}%"></i></div>
       <div class="split">${c.picked}/${c.units} picked · totes ${c.totes}/${c.orders}${c.picker ? ` · ${esc(c.picker)}` : ""}</div>
+      ${c.status === "completed" ? `<div class="split"><b style="color:var(--ink)">${c.orders_packed}/${c.orders} orders packed</b>${c.last_packed_at ? ` · last ${new Date(c.last_packed_at).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}` : ""}</div>` : ""}
       <div class="split">Starts at ${esc(c.first_bin ?? "-")} · built ${new Date(c.created_at).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}${c.created_by ? ` by ${esc(c.created_by)}` : ""}</div></div>`; }).join("")
     : `<p class="panel">No carts yet. Build some from the Orders tab.</p>`;
 }
 $("refreshCarts").onclick = loadCarts;
+
+// ---------------- history ----------------
+const TZ = "Australia/Adelaide";
+const hm = (t) => t ? new Date(t).toLocaleTimeString("en-AU", { timeZone: TZ, hour: "numeric", minute: "2-digit" }) : "";
+const dayhm = (t) => t ? `${new Date(t).toLocaleDateString("en-AU", { timeZone: TZ, weekday: "short" })} ${hm(t)}` : "-";
+const mins = (a, b) => { if (!a || !b) return ""; const m = Math.round((new Date(b) - new Date(a)) / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+const EV = { built: ["Cart built", ""], start: ["Picking started", ""], pause: ["Paused", ""], resume: ["Resumed", ""], release: ["Released (unassigned)", ""],
+  take_over: ["Taken over", ""], finish: ["Picking finished", "evgood"], missing: ["Missing item", "evbad"], picked_without_scan: ["Picked without scan", ""],
+  packed: ["Order packed", "evgood"], taken_apart: ["Cart taken apart", "evbad"] };
+let hist = [];
+async function loadHistory() {
+  const { data: d, error } = await sb.rpc("wms_cart_history");
+  if (error) { await check(error); $("hist").innerHTML = `<tr><td colspan="9" class="bad">${esc(error.message)}</td></tr>`; return; }
+  hist = d.carts;
+  const day = (x) => new Date(x + "T00:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+  $("histsum").textContent = `${hist.length} CARTS · ${day(d.from).toUpperCase()} TO ${day(d.to).toUpperCase()} · ${hist.filter((c) => c.stage === "picked_packed").length} PICKED & PACKED · ${hist.filter((c) => c.stage === "ready_to_pack").length} READY FOR PACKING`;
+  $("hist").innerHTML = hist.length ? hist.map((c, i) => { const [label, col] = SC[c.stage] ?? SC[c.status] ?? [c.stage, "var(--muted)"];
+    return `<tr class="hrow" data-h="${i}"><td><b>${esc(c.cart)}</b></td><td>${grpBadge(c.group)}</td><td><span class="stg" style="background:${col}">${label}</span></td>
+      <td>${dayhm(c.created_at)}<div class="split">${esc(c.created_by ?? "")}</div></td>
+      <td>${c.started_at ? `${hm(c.started_at)}${c.completed_at && c.status === "completed" ? ` to ${hm(c.completed_at)}` : ""}<div class="split">${esc(c.pickers.join(", "))}${c.status === "completed" ? ` · ${mins(c.started_at, c.completed_at)}` : ""}</div>` : `<span class="split">Not started</span>`}</td>
+      <td class="num">${c.orders}</td><td class="num">${c.picked}/${c.units}</td><td class="num">${c.missing ? `<b style="color:var(--red)">${c.missing}</b>` : "-"}</td>
+      <td>${c.orders ? `${c.orders_packed}/${c.orders} packed` : "-"}${c.last_packed_at ? `<div class="split">${hm(c.first_packed_at)} to ${hm(c.last_packed_at)} · ${esc(c.packers.join(", "))}</div>` : ""}</td></tr>`; }).join("")
+    : `<tr><td colspan="9">No carts built in this period.</td></tr>`;
+}
+$("hist").addEventListener("click", (e) => {
+  const tr = e.target.closest("tr.hrow"); if (!tr) return;
+  const next = tr.nextElementSibling;
+  if (next?.classList.contains("tlrow")) { next.remove(); tr.classList.remove("open"); return; }
+  const c = hist[Number(tr.dataset.h)]; tr.classList.add("open");
+  const row = document.createElement("tr"); row.className = "tlrow";
+  row.innerHTML = `<td colspan="9" class="tl"><ol>${c.timeline.map((ev) => { const [label, cls] = EV[ev.what] ?? [ev.what, ""];
+    const note = ev.what === "built" && /^0 orders$/.test(ev.note ?? "") ? "" : ev.note;
+    return `<li class="${cls}"><span class="t">${dayhm(ev.at)}</span><b>${esc(label)}</b><span>${esc([ev.who, note].filter(Boolean).join(" · "))}</span></li>`; }).join("")}</ol></td>`;
+  tr.after(row);
+});
+$("refreshHist").onclick = loadHistory;
 async function loadRates() {
   const { data: r, error } = await sb.rpc("wms_pick_rates");
   if (error) { $("rates").innerHTML = `<tr><td colspan="7" class="bad">${esc(error.message)}</td></tr>`; return; }

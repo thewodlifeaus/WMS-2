@@ -79,6 +79,7 @@
     </table></div>
     <div class="build" id="build" hidden>
       <span><b id="selcount">0</b> <span class="mono">ORDERS SELECTED</span></span>
+      <button class="ghost" id="pickprio" style="color:#fff;border-color:#c2185b;background:#c2185b" title="Select every ready Priority Dispatch order (tagged priority-order in ShipStation) that has stock">Select Priority Dispatch</button>
       <label class="mono">Select first <input id="firstn" inputmode="numeric" value="60"></label><button class="ghost" id="pickfirst" style="color:#fff;border-color:#fff">Select</button>
       <span class="seg"><button id="m1" class="on" type="button">1 order per tote</button><button id="m2" type="button">Share totes</button></span>
       <label class="mono">Totes per cart <input id="per" inputmode="numeric" value="25"></label>
@@ -142,7 +143,10 @@ const GROUPS = [["REGS","Regular","#2f5bd3"],["PRIO_AU","Priority AU","#c2185b"]
 const GN = Object.fromEntries(GROUPS.map(([k, l, c]) => [k, { label: l, col: c }]));
 const grpBadge = (g) => (g ?? "").split("+").filter(Boolean).map((k) => `<span class="grp" style="background:${GN[k]?.col ?? "#757575"}">${esc(GN[k]?.label ?? k)}</span>`).join(" ");
 let typeF = "ALL", skuF = "all";
-const shown = () => (data?.orders ?? []).filter((o) => (typeF === "ALL" || o.group === typeF)
+// Priority Dispatch = every order tagged priority-order in ShipStation (Priority AU + International).
+// It is a quick filter only: AU and international still build onto their own carts.
+const isPrio = (o) => (o.group ?? "").split("+").some((k) => k === "PRIO_AU" || k === "PRIO_INT");
+const shown = () => (data?.orders ?? []).filter((o) => (typeF === "ALL" || (typeF === "PRIO" ? isPrio(o) : o.group === typeF))
   && (skuF === "all" || (skuF === "single" ? o.lines === 1 : o.lines > 1)));
 async function loadOrders() {
   const { data: d, error } = await sb.rpc("wms_order_queue", { p_view: view, p_search: $("q").value.trim() || null });
@@ -187,10 +191,18 @@ $("rows").addEventListener("change", (e) => { const c = e.target.closest("input[
 $("all").addEventListener("change", () => { for (const o of shown()) if (o.ready === "ready") $("all").checked ? sel.add(o.id) : sel.delete(o.id); loadOrdersRender(); });
 $("pickfirst").onclick = () => { sel.clear(); const n = Number($("firstn").value) || 0;
   for (const o of shown().filter((x) => x.ready === "ready" && x.stock_ok).slice(0, n)) sel.add(o.id); loadOrdersRender(); };
+$("pickprio").onclick = () => { typeF = "PRIO"; sel.clear();
+  const ready = (data?.orders ?? []).filter((o) => isPrio(o) && o.ready === "ready");
+  for (const o of ready.filter((x) => x.stock_ok)) sel.add(o.id);
+  const short = ready.length - sel.size;
+  $("err").textContent = short ? `${short} Priority Dispatch order${short === 1 ? " is" : "s are"} short of stock and not selected (tick them by hand if you still want them on a cart).` : "";
+  if (!ready.length) $("err").textContent = "No Priority Dispatch orders are ready to cart.";
+  renderTypes(); loadOrdersRender(); };
 function loadOrdersRender() { const r = shown(); $("rows").innerHTML = r.length ? r.map(row).join("") : `<tr><td colspan="11">No orders here.</td></tr>`; updateSel(); }
 function renderTypes() {
   const g = data?.groups ?? {}; const total = Object.values(g).reduce((a, n) => a + n, 0);
   $("types").innerHTML = `<span class="mono">TYPE</span><button data-t="ALL" class="${typeF === "ALL" ? "on" : ""}">All types <b>${fmt(total)}</b></button>`
+    + ((g.PRIO_AU || g.PRIO_INT || typeF === "PRIO") ? `<button data-t="PRIO" class="${typeF === "PRIO" ? "on" : ""}" title="All orders tagged priority-order in ShipStation (Priority AU + International)" style="font-weight:800"><span style="width:10px;height:10px;border-radius:50%;background:#c2185b"></span>Priority Dispatch <b>${fmt((g.PRIO_AU ?? 0) + (g.PRIO_INT ?? 0))}</b></button><span style="width:8px"></span>` : "")
     + GROUPS.filter(([k]) => g[k] || typeF === k).map(([k, l, c]) => `<button data-t="${k}" class="${typeF === k ? "on" : ""}"><span style="width:10px;height:10px;border-radius:50%;background:${c}"></span>${esc(l)} <b>${fmt(g[k] ?? 0)}</b></button>`).join("")
     + `<span style="width:16px"></span><span class="mono">ITEMS</span>`
     + [["all","Any"],["single","1 SKU only"],["multi","2+ SKUs"]].map(([k, l]) => `<button data-k="${k}" class="${skuF === k ? "on" : ""}">${l}</button>`).join("");

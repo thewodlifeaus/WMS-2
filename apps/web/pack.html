@@ -29,6 +29,7 @@
   .line.flash{outline:3px solid var(--green)}
   .q{font:600 26px "IBM Plex Mono",monospace;color:var(--ink);text-align:right;min-width:90px}
   .sku{font:600 13px "IBM Plex Mono",monospace;color:var(--muted)}
+  .kitflag{display:inline-block;margin-top:4px;font:800 11px Archivo,sans-serif;letter-spacing:.04em;padding:3px 7px;background:var(--blue);color:#fff}
   .side .panel{margin-bottom:12px}
   .weight{font:600 54px/1 "IBM Plex Mono",monospace;color:var(--ink);text-align:center;padding:14px 0}
   .weight small{font-size:18px;color:var(--muted)}
@@ -268,6 +269,7 @@ function render(v) {
   $("lines").innerHTML = (v.lines ?? []).map((l) => `<div class="line ${l.remaining === 0 ? "done" : ""}" data-sku="${esc(l.sku)}">
       ${l.image_url ? `<img src="${esc(l.image_url + (l.image_url.includes("?") ? "&" : "?") + "width=128")}" alt="">` : `<div class="noimg"></div>`}
       <div><div><b>${esc(l.name)}</b> ${l.variant ? `<span class="mono">${esc(l.variant)}</span>` : ""}</div><div class="sku">${esc(l.sku)}</div>
+        ${l.kit_sku ? `<span class="kitflag">PART OF KIT: ${esc(l.kit_title || l.kit_sku)} × ${l.kit_qty ?? 1}</span>` : ""}
         ${(l.pick_flag ?? []).map((f) => `<span class="lineflag ${f.kind === "missing" ? "" : "amber"}">${f.kind === "missing" ? `MISSING ${f.qty}: NOT IN TOTE` : `${f.qty} PICKED WITHOUT SCAN: CHECK IT`} · ${esc(FLAG[f.reason] ?? f.reason)}</span>`).join(" ")}
         ${v.status === "packing" && l.remaining > 0 ? `<button class="ghost passbtn" data-pass="${esc(l.order_line_id)}">Can't scan? Pass manually</button>` : ""}</div>
       <div class="q">${l.qty_packed}/${l.qty_ordered}</div></div>`).join("");

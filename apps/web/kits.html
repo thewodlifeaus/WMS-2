@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kits · TWL WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css?v=3">
+<style>
+  .wrap{max-width:1300px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
+  .row label{display:grid;gap:4px}
+  .help{background:var(--panel);border-left:4px solid var(--blue);padding:10px 12px;margin-bottom:12px;font-size:14px}
+  .help b{color:var(--ink)}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-bottom:12px}
+  .tile{background:var(--surface);border:1px solid var(--rule);padding:10px 12px}
+  .tile b{display:block;font-size:26px;color:var(--ink);font-weight:900}
+  td{font-size:14px}
+  .code{font:600 14px "IBM Plex Mono",monospace;color:var(--ink);word-break:break-all}
+  .small{font-size:12px;color:var(--muted)}
+  .part{font:500 13px "IBM Plex Mono",monospace;color:var(--ink)}
+  .sub{color:var(--muted)}
+  tr.kit{cursor:pointer} tr.kit:hover td{background:var(--panel)}
+  tr.off td{color:var(--muted)}
+  .modal{position:fixed;inset:0;background:rgba(17,17,17,.6);display:grid;place-items:center;padding:16px;z-index:10}
+  .modal .panel{max-width:820px;width:100%;max-height:94vh;overflow:auto}
+  .line{border:1px solid var(--rule);background:var(--surface);padding:10px;margin-bottom:8px}
+  .line .top{display:grid;grid-template-columns:1fr 90px auto;gap:8px;align-items:end}
+  .skus{margin:8px 0 0;display:grid;gap:4px}
+  .sk{display:flex;gap:8px;align-items:center;justify-content:space-between;border:1px solid var(--rule);padding:6px 8px;background:var(--panel)}
+  .sk button{min-height:32px;padding:0 10px}
+  .finder{position:relative;margin-top:6px}
+  .results{position:absolute;left:0;right:0;top:100%;z-index:5;background:var(--surface);border:1px solid var(--ink);max-height:260px;overflow:auto}
+  .results div{padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--rule);font-size:14px}
+  .results div:hover{background:var(--panel)}
+  .warn{color:var(--amber);font-weight:700} .bad{color:var(--red);font-weight:700} .good{color:var(--green);font-weight:800}
+  ul.msgs{margin:6px 0 0 18px}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  @media (max-width:640px){.line .top{grid-template-columns:1fr 80px}}
+</style>
+</head>
+<body>
+<div class="bar"><a class="logo" href="/index.html">TWL</a><span class="mono" style="color:#ccc">KITS</span><button class="ghost" id="out">Sign out</button></div>
+<main class="wrap">
+  <div class="help">A <b>kit</b> is a SKU you sell (eg a 3-pack or a bundle) that has no stock of its own. When an order comes in with a kit SKU, the WMS swaps it for its <b>parts</b>, so pickers pick the parts and the pack desk scans the parts. Each line can have <b>substitutes</b>: if the main SKU is short, the first substitute with enough stock is used. Kits from SkuVault were imported; kits you create or change here are marked <b>WMS</b>.</div>
+
+  <div class="tiles">
+    <div class="tile"><span class="mono">Kits switched on</span><b id="tOn">–</b></div>
+    <div class="tile"><span class="mono">Switched off</span><b id="tOff">–</b></div>
+    <div class="tile"><span class="mono">Showing</span><b id="tShown">–</b></div>
+  </div>
+
+  <div class="row" style="margin-bottom:10px">
+    <label style="flex:1;min-width:220px"><span class="mono">Search kit SKU, title, barcode or a part SKU</span><input id="q" placeholder="eg TWLPOWERTAPE or TWU-SO-17"></label>
+    <label><span class="mono">Show</span><select id="show" style="width:170px"><option value="active">Switched on</option><option value="off">Switched off</option><option value="all">All</option></select></label>
+    <button id="go">Search</button>
+    <button class="signal" id="newKit">+ New kit</button>
+    <button class="ghost" id="fixQueue" title="Match and split kit SKUs on orders already waiting to be picked">Split kits on waiting orders</button>
+  </div>
+  <p id="msg" class="small" style="min-height:1.4em"></p>
+
+  <div style="overflow-x:auto"><table>
+    <thead><tr><th>Kit</th><th>Parts (qty × SKU, or substitutes)</th><th class="num">Can make</th><th class="num">Orders 30d</th><th>From</th><th>On</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="6" class="mono">Loading…</td></tr></tbody>
+  </table></div>
+  <div style="margin-top:10px"><button class="ghost" id="more" hidden>Show more</button></div>
+</main>
+
+<div class="modal" id="ed" hidden><div class="panel">
+  <div class="kicker"><h2 id="edTitle">New kit</h2><button class="ghost" id="edClose" style="min-height:36px">Close</button></div>
+  <div class="row">
+    <label style="flex:1;min-width:220px"><span class="mono">Kit SKU (the SKU customers order)</span><input id="eSku" placeholder="eg TWU-SO-17-BL-OS-3PK" autocomplete="off"></label>
+    <label style="width:220px"><span class="mono">Barcode / code (optional)</span><input id="eCode" autocomplete="off"></label>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label style="flex:1"><span class="mono">Title</span><input id="eTitle" placeholder="eg Glide Socks Black 3-Pack"></label>
+  </div>
+  <p id="eSkuNote" class="small" style="margin-top:6px"></p>
+
+  <div class="kicker" style="margin-top:14px"><h2>Lines</h2><button class="ghost" id="addLine" style="min-height:36px">+ Add line</button></div>
+  <div id="lines"></div>
+
+  <div id="preview" style="margin-top:10px"></div>
+  <div class="actions">
+    <button id="check">Check</button>
+    <button class="signal" id="save" disabled>Save kit</button>
+    <button class="ghost" id="toggle" hidden></button>
+  </div>
+</div></div>
+
+<script type="module">
+import { sb, requireLogin, signOut, esc, fmt, clearLogin } from "/js/app.js?v=7";
+await requireLogin();
+const $ = (id) => document.getElementById(id);
+$("out").onclick = signOut;
+
+let offset = 0, list = [];
+async function rpc(fn, args) {
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) { if (/FORBIDDEN|NOT_STAFF|JWT/i.test(error.message)) { await clearLogin(); location.href = "/index.html?next=/kits.html"; } throw error; }
+  return data;
+}
+const partsHtml = (k) => (k.lines ?? []).map((l) => `<div class="part">${l.qty} × ${(l.skus ?? []).map((s, i) =>
+  `<span class="${i ? "sub" : ""}" title="${esc(s.name)} · ${fmt(s.free)} free">${i ? "or " : ""}${esc(s.sku)}</span>`).join(" ")}</div>`).join("");
+
+async function load(more = false) {
+  if (!more) { offset = 0; list = []; }
+  $("msg").textContent = "Loading…";
+  const d = await rpc("wms_kits", { p_search: $("q").value.trim() || null, p_show: $("show").value, p_limit: 100, p_offset: offset });
+  list = list.concat(d.kits); offset += d.kits.length;
+  $("tOn").textContent = fmt(d.counts.active); $("tOff").textContent = fmt(d.counts.off);
+  $("tShown").textContent = `${fmt(list.length)} / ${fmt(d.total)}`;
+  $("more").hidden = list.length >= d.total;
+  $("msg").textContent = "";
+  $("rows").innerHTML = list.length ? list.map((k, i) => `<tr class="kit ${k.active ? "" : "off"}" data-i="${i}">
+      <td><div class="code">${esc(k.kit_sku)}</div><div class="small">${esc(k.title)}</div>${k.kit_stock > 0 ? `<div class="warn small">${fmt(k.kit_stock)} of the kit SKU itself in locations</div>` : ""}</td>
+      <td>${partsHtml(k)}</td>
+      <td class="num">${k.available == null ? "–" : fmt(k.available)}</td>
+      <td class="num">${fmt(k.orders_30d)}</td>
+      <td><span class="chip ${k.source === "wms" ? "" : "ink"}">${k.source === "wms" ? "WMS" : "SkuVault"}</span>${k.updated_by ? `<div class="small">${esc(k.updated_by)}</div>` : ""}</td>
+      <td>${k.active ? '<span class="good">On</span>' : '<span class="bad">Off</span>'}</td></tr>`).join("")
+    : `<tr><td colspan="6">No kits match.</td></tr>`;
+}
+$("go").onclick = () => load();
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+$("show").onchange = () => load();
+$("more").onclick = () => load(true);
+$("rows").addEventListener("click", (e) => { const tr = e.target.closest("tr.kit"); if (tr) openEditor(list[Number(tr.dataset.i)]); });
+
+$("fixQueue").onclick = async () => {
+  $("fixQueue").disabled = true;
+  try {
+    const r = await rpc("wms_kits_fix_queue", {});
+    $("msg").textContent = `Waiting orders checked: ${r.kit_lines_split} kit lines split into parts, ${r.lines_matched} unknown SKUs matched, ${r.holds_released} "Unknown SKU" holds released.`;
+  } catch (e) { $("msg").textContent = e.message; }
+  $("fixQueue").disabled = false;
+};
+
+// ---------------- editor ----------------
+let ed = null;   // {kit (existing or null), lines: [{name, qty, skus:[{sku,name,free}]}]}
+function openEditor(kit) {
+  ed = { kit, lines: kit ? kit.lines.map((l) => ({ name: l.name, qty: l.qty, skus: (l.skus ?? []).map((s) => ({ ...s })) })) : [{ name: "", qty: 1, skus: [] }] };
+  $("edTitle").textContent = kit ? `Edit kit ${kit.kit_sku}` : "New kit";
+  $("eSku").value = kit?.kit_sku ?? ""; $("eSku").disabled = !!kit;
+  $("eTitle").value = kit?.title ?? ""; $("eCode").value = kit?.code ?? "";
+  $("eSkuNote").textContent = kit ? `${kit.source === "wms" ? "Made in the WMS" : "Imported from SkuVault"} · version ${kit.version}${kit.updated_at ? ` · changed ${new Date(kit.updated_at).toLocaleString("en-AU")}` : ""}. Saving makes it a WMS kit (SkuVault re-imports won't overwrite it).`
+    : "The kit SKU must match the SKU on the Shopify product. If the WMS doesn't know it yet, it is added (Shopify fills in the details later).";
+  $("toggle").hidden = !kit; $("toggle").textContent = kit?.active ? "Switch kit off" : "Switch kit on";
+  $("preview").innerHTML = ""; $("save").disabled = true;
+  drawLines(); $("ed").hidden = false;
+}
+$("newKit").onclick = () => openEditor(null);
+$("edClose").onclick = () => { $("ed").hidden = true; };
+$("addLine").onclick = () => { ed.lines.push({ name: "", qty: 1, skus: [] }); dirty(); drawLines(); };
+const dirty = () => { $("save").disabled = true; $("preview").innerHTML = ""; };
+["eSku", "eTitle", "eCode"].forEach((id) => $(id).addEventListener("input", dirty));
+
+function drawLines() {
+  $("lines").innerHTML = ed.lines.map((l, i) => `<div class="line" data-l="${i}">
+    <div class="top">
+      <label style="display:grid;gap:4px"><span class="mono">Line ${i + 1} name</span><input data-f="name" value="${esc(l.name)}" placeholder="eg Socks (blank = product name)"></label>
+      <label style="display:grid;gap:4px"><span class="mono">Qty in kit</span><input data-f="qty" type="number" min="1" inputmode="numeric" value="${l.qty}"></label>
+      <button class="ghost" data-act="rmLine" ${ed.lines.length < 2 ? "disabled" : ""}>Remove line</button>
+    </div>
+    <div class="skus">${l.skus.map((s, j) => `<div class="sk"><div><span class="mono">${j ? `Substitute ${j}` : "Main SKU"}</span> <span class="code">${esc(s.sku)}</span>
+        <span class="small">${esc(s.name ?? "")} · ${fmt(s.free)} free</span></div>
+        <div>${j ? `<button class="ghost" data-act="up" data-s="${j}">Make main</button>` : ""}<button class="ghost" data-act="rmSku" data-s="${j}">Remove</button></div></div>`).join("")}</div>
+    <div class="finder"><input data-f="find" placeholder="${l.skus.length ? "Add a substitute: type SKU, name or scan barcode" : "Add the SKU: type SKU, name or scan barcode"}" autocomplete="off"><div class="results" hidden></div></div>
+  </div>`).join("");
+}
+
+let findTimer;
+$("lines").addEventListener("input", (e) => {
+  const box = e.target.closest(".line"); if (!box) return;
+  const l = ed.lines[Number(box.dataset.l)], f = e.target.dataset.f;
+  if (f === "name") { l.name = e.target.value; dirty(); }
+  if (f === "qty") { l.qty = Number(e.target.value); dirty(); }
+  if (f === "find") {
+    clearTimeout(findTimer);
+    const res = box.querySelector(".results"), q = e.target.value.trim();
+    if (q.length < 2) { res.hidden = true; return; }
+    findTimer = setTimeout(async () => {
+      const found = await rpc("wms_kit_find_products", { p_q: q });
+      res.innerHTML = found.length ? found.map((p) => `<div data-p='${esc(JSON.stringify(p))}'><span class="code">${esc(p.sku)}</span> ${p.is_kit ? '<span class="chip">KIT</span>' : ""}<br><span class="small">${esc(p.name)}${p.variant ? ` · ${esc(p.variant)}` : ""} · ${fmt(p.free)} free</span></div>`).join("")
+        : `<div class="small">No product found. Products come from Shopify; new ones appear after the next catalogue sync.</div>`;
+      res.hidden = false;
+    }, 250);
+  }
+});
+$("lines").addEventListener("keydown", (e) => {   // scanner: Enter picks the exact match
+  if (e.key !== "Enter" || e.target.dataset.f !== "find") return;
+  const first = e.target.closest(".finder").querySelector(".results div[data-p]"); if (first) first.click();
+});
+$("lines").addEventListener("click", (e) => {
+  const box = e.target.closest(".line"); if (!box) return;
+  const i = Number(box.dataset.l), l = ed.lines[i];
+  const pick = e.target.closest(".results div[data-p]");
+  if (pick) {
+    const p = JSON.parse(pick.dataset.p);
+    if (!l.skus.some((s) => s.sku === p.sku)) l.skus.push({ sku: p.sku, name: p.name, free: p.free });
+    if (!l.name && l.skus.length === 1) l.name = p.name;
+    dirty(); drawLines(); $("lines").children[i]?.querySelector('[data-f="find"]')?.focus(); return;
+  }
+  const act = e.target.dataset.act; if (!act) return;
+  const j = Number(e.target.dataset.s);
+  if (act === "rmLine") ed.lines.splice(i, 1);
+  if (act === "rmSku") l.skus.splice(j, 1);
+  if (act === "up") l.skus.unshift(...l.skus.splice(j, 1));
+  dirty(); drawLines();
+});
+
+const payload = () => ({
+  p_kit_sku: $("eSku").value.trim(), p_title: $("eTitle").value.trim() || null, p_code: $("eCode").value.trim() || null,
+  p_lines: ed.lines.map((l) => ({ name: l.name.trim(), qty: l.qty, skus: l.skus.map((s) => s.sku) })), p_new_product_name: null,
+});
+const ERR = { KIT_SKU_REQUIRED: "Type the kit SKU", FORBIDDEN: "Only admins and supervisors can change kits" };
+
+$("check").onclick = async () => {
+  try {
+    const r = await rpc("wms_kit_save", { ...payload(), p_confirmed: false });
+    if (r.error) { $("preview").innerHTML = `<p class="bad">${esc(ERR[r.error] ?? r.error)}</p>`; return; }
+    const units = ed.lines.reduce((a, l) => a + (Number(l.qty) || 0), 0);
+    $("preview").innerHTML = `<div class="help" style="border-left-color:${r.ok ? "var(--green)" : "var(--red)"}">
+      ${r.ok ? `<b>Ready to save.</b> ${esc($("eSku").value.trim())} = ${ed.lines.length} line${ed.lines.length > 1 ? "s" : ""}, ${units} item${units > 1 ? "s" : ""} per kit.` : "<b>Fix these first:</b>"}
+      ${r.errors.length ? `<ul class="msgs bad">${r.errors.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+      ${r.warnings.length ? `<ul class="msgs warn">${r.warnings.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+      ${r.ok && r.new_product ? `<p style="margin-top:6px">The WMS doesn't know this SKU yet: it will be added as a product.</p>` : ""}
+      ${r.ok && r.orders_waiting ? `<p style="margin-top:6px">${r.orders_waiting} waiting order(s) have this SKU: they will be split into the parts.</p>` : ""}</div>`;
+    $("save").disabled = !r.ok;
+  } catch (e) { $("preview").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+};
+$("save").onclick = async () => {
+  $("save").disabled = true;
+  try {
+    const r = await rpc("wms_kit_save", { ...payload(), p_confirmed: true });
+    if (!r.saved) { $("preview").innerHTML = `<p class="bad">${esc((r.errors ?? [r.error]).join(", "))}</p>`; return; }
+    $("ed").hidden = true;
+    $("q").value = r.kit.kit_sku; $("show").value = "all"; await load();
+    $("msg").textContent = `Saved ${r.kit.kit_sku} (version ${r.version}).${r.queue?.kit_lines_split ? ` ${r.queue.kit_lines_split} waiting order line(s) split into parts.` : ""}`;
+  } catch (e) { $("preview").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+};
+$("toggle").onclick = async () => {
+  const r = await rpc("wms_kit_set_active", { p_kit_sku: ed.kit.kit_sku, p_active: !ed.kit.active });
+  if (!r.ok) { $("preview").innerHTML = `<p class="bad">${esc(r.error)}</p>`; return; }
+  $("ed").hidden = true; await load();
+  $("msg").textContent = `${r.kit.kit_sku} switched ${r.kit.active ? "on" : "off"}. ${r.kit.active ? "" : "New orders for it will keep the kit SKU and won't be split."}`;
+};
+
+load();
+</script>
+</body>
+</html>
